@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "fps": 24,
+  "width": 360,
+  "height": 640,
+  "shots": [
+    {
+      "id": "s01",
+      "frames": 48,
+      "camera": {
+        "position": [
+          6,
+          -9,
+          5
+        ],
+        "follow": "hero",
+        "offset": [
+          0,
+          0,
+          0.7
+        ],
+        "lens": 40,
+        "interpolation": "smooth",
+        "keys": [
+          {
+            "frame": 1,
+            "position": [
+              6,
+              -9,
+              5
+            ]
+          },
+          {
+            "frame": 48,
+            "position": [
+              3,
+              -7,
+              3.5
+            ],
+            "lens": 45
+          }
+        ]
+      },
+      "objects": [
+        {
+          "id": "ground",
+          "shape": "cube",
+          "scale": [
+            5,
+            3,
+            0.1
+          ],
+          "color": [
+            0.6,
+            0.55,
+            0.4
+          ],
+          "keys": [
+            {
+              "frame": 1,
+              "position": [
+                0,
+                0,
+                -0.1
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hero",
+          "shape": "capsule",
+          "scale": [
+            0.6,
+            0.6,
+            0.6
+          ],
+          "color": [
+            0.2,
+            0.7,
+            0.6
+          ],
+          "keys": [
+            {
+              "frame": 1,
+              "position": [
+                -2,
+                0,
+                0.0
+              ]
+            },
+            {
+              "frame": 12,
+              "position": [
+                -1,
+                0,
+                0.0
+              ]
+            },
+            {
+              "frame": 24,
+              "position": [
+                0,
+                0,
+                1.5
+              ]
+            },
+            {
+              "frame": 36,
+              "position": [
+                1,
+                0,
+                0.0
+              ]
+            },
+            {
+              "frame": 48,
+              "position": [
+                2,
+                0,
+                0.0
+              ]
+            }
+          ],
+          "ground_contact": [
+            [
+              1,
+              12
+            ],
+            [
+              36,
+              48
+            ]
+          ],
+          "interpolation": "smooth"
+        },
+        {
+          "id": "house",
+          "shape": "cube",
+          "scale": [
+            0.8,
+            0.8,
+            1
+          ],
+          "color": [
+            0.65,
+            0.35,
+            0.25
+          ],
+          "keys": [
+            {
+              "frame": 1,
+              "position": [
+                0,
+                2,
+                1
+              ]
+            }
+          ]
+        }
+      ],
+      "audit": {
+        "subjects": [
+          "hero"
+        ],
+        "step": 1,
+        "margin": 0.03,
+        "ground_z": 0,
+        "tolerance": 0.03
+      }
+    }
+  ]
+}

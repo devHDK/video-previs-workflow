@@ -14,7 +14,7 @@ Record for each shot: ID, duration in frames, subject IDs, setting, camera, star
 
 ## Previs review
 
-Use simple geometry sufficient to expose composition, scale, occlusion, movement and contact. A jump requires takeoff, airborne arc and landing; rigid sliding blocks may be inadequate. Add proxy parts or custom Blender logic when needed. The bundled renderer is a starter for primitive transforms and camera positioning, not a full rigging system. Preserve its limitations in the review notes.
+Use simple geometry sufficient to expose composition, scale, occlusion, movement and contact. A jump requires takeoff, airborne arc and landing; rigid sliding blocks may be inadequate. Add proxy parts or custom Blender logic when needed. The bundled renderer supports primitive/capsule transforms, camera paths, target tracking and lens keys, with sampled geometry audits. It is not a full rigging system. Preserve its limitations in the review notes.
 
 Prepare the animatic plus key frames at cuts and required events, with shot IDs and frame numbers in the review description. If a reference exists, compare it beside the previs; otherwise compare against the written action requirements. Inspect the actual render before asking the user to approve. Save approval evidence and revision/hash.
 

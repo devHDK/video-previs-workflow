@@ -2,7 +2,7 @@
 
 This is a first implementation, not a claim of completed production-video validation.
 
-## Passed
+## Initial version checks
 
 - Official OpenAI skill-creator `quick_validate.py`: `Skill is valid!`.
 - Python 3.11.7: seven unit tests pass. Tests first failed because helper implementations were absent, then passed after implementation.
@@ -26,7 +26,7 @@ The forward evaluator initially saw a partially written directory and reported a
 - `npx skills add` installer execution: documented installation route, not tested here.
 - Windows/Linux runtime behavior.
 
-The fixed-camera primitive renderer and media helper require real runtime smoke tests before production reliance. The renderer targets Blender 4.2+ EEVEE Next; version compatibility has not been proven. No frame-identical AI motion is promised.
+The renderer and media helper require real runtime smoke tests before production reliance. The renderer targets Blender 4.2+ EEVEE Next; version compatibility has not been proven. No frame-identical AI motion is promised.
 
 ## Next production smoke test
 
@@ -40,3 +40,15 @@ The fixed-camera primitive renderer and media helper require real runtime smoke 
 ## Independent package review
 
 One actionable QA finding was fixed: final decode now passes `-xerror` so reported decode errors fail verification. The command-contract regression test failed before the fix and passed after it; a corrupted-media runtime test remains unexecuted without FFmpeg. No other important code or workflow finding was reported.
+
+## Blender controls update
+
+Added deterministic linear/smooth integer-frame sampling, camera path/follow/lens keys, a foot-rooted capsule, sampled bounding-box framing and center-ray occlusion reports, declared ground-contact windows, review stills, and a cut/role handoff. GUI execution is rejected before resetting a scene. Optional-control validation rejects invalid lenses, missing follow subjects, invalid intervals and a camera coincident with its target at a sampled frame.
+
+Nine new unit tests failed against the prior implementation, then passed with the additions (initially 16 unit tests; now 18 after review regressions). A real Blender smoke test is included in `tests/test_blender_runtime.py`; it is skipped explicitly when Blender is unavailable. It can use `BLENDER_BIN` for a nonstandard installation. It verifies review PNGs, saved scene camera/lens keys, and the audit report. Compilation/schema checks do not substitute for that test.
+
+Behavior change: previous implicit Bezier motion becomes explicit linear by default, with opt-in smoothstep; old specs must be rerendered/reviewed. The capsule has no articulated limbs. Occlusion is a single center ray; ground contact uses a bounding-box bottom and flat plane. No mesh collision, terrain contact, advanced rigging or AI frame fidelity is claimed.
+
+Reference reviewed: Scenario Labs' blockout skill and its MIT license. This update uses independently written helpers and introduces no Scenario package or service dependency. No upstream code is bundled.
+
+Independent review found two camera override bugs: an unused malformed target crashed follow-camera sampling, and a base coincident target was rejected even when frame-1 keys/follow provided a valid target. Both were reproduced in tests and fixed. Final suite: 18 passed, 1 Blender integration test explicitly skipped. Omitted object rotation now holds the previous pose; the migration note documents the change.

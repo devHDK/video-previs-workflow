@@ -34,9 +34,8 @@ def validate(spec):
         n = shot.get('frames'); need(integer(n), f'{sid}: frames must be positive integer')
         cam = shot.get('camera', {})
         if not isinstance(cam, dict): errors.append(f'{sid}: invalid camera'); cam = {}
-        for key in ('position', 'target'):
+        for key in (('position',) if 'follow' in cam else ('position', 'target')):
             need(vector(cam.get(key)), f'{sid}: camera {key} needs 3 finite numbers')
-        need(cam.get('position') != cam.get('target'), f'{sid}: camera cannot target itself')
         objects = shot.get('objects')
         if not isinstance(objects, list): errors.append(f'{sid}: objects must be a list'); continue
         ids = set()
@@ -45,7 +44,7 @@ def validate(spec):
             oid = obj.get('id')
             need(isinstance(oid, str) and bool(oid) and oid not in ids, f'{sid}: unique object id required')
             if isinstance(oid, str): ids.add(oid)
-            need(obj.get('shape') in ('cube', 'sphere', 'cylinder'), f'{sid}/{oid}: unsupported shape')
+            need(obj.get('shape') in ('cube', 'sphere', 'cylinder', 'capsule'), f'{sid}/{oid}: unsupported shape')
             need(vector(obj.get('color'), 0, 1), f'{sid}/{oid}: color must be RGB 0..1')
             need(vector(obj.get('scale'), positive=True), f'{sid}/{oid}: scale must be positive XYZ')
             keys = obj.get('keys')
@@ -60,6 +59,55 @@ def validate(spec):
                 need(vector(key.get('position')), f'{sid}/{oid}: position must be XYZ')
                 if 'rotation' in key: need(vector(key['rotation']), 'rotation must be XYZ radians')
             need(isinstance(keys[0], dict) and keys[0].get('frame') == 1, f'{sid}/{oid}: first key must be frame 1')
+        # Optional controls are validated before any motion sampling.
+        def finite(v): return type(v) in (int, float) and math.isfinite(v)
+        need(finite(cam.get('lens', 40)) and cam.get('lens', 40) > 0, f'{sid}: lens must be positive')
+        need(cam.get('interpolation', 'linear') in ('linear', 'smooth'), f'{sid}: invalid camera interpolation')
+        need(vector(cam.get('offset', [0, 0, 0])), f'{sid}: offset must be XYZ')
+        if 'follow' in cam:
+            need(isinstance(cam['follow'], str) and cam['follow'] in ids, f'{sid}: unknown follow subject')
+        if 'keys' in cam:
+            ck = cam['keys']
+            need(isinstance(ck, list) and bool(ck), f'{sid}: camera keys must be nonempty')
+            last = 0
+            for key in ck if isinstance(ck, list) else []:
+                if not isinstance(key, dict): errors.append('camera key must be an object'); continue
+                f = key.get('frame')
+                good = integer(f) and integer(n) and last < f <= n
+                need(good, f'{sid}: camera frames must increase within shot')
+                if good: last = f
+                for prop in ('position', 'target'):
+                    if prop in key: need(vector(key[prop]), f'{sid}: invalid camera {prop}')
+                if 'lens' in key: need(finite(key['lens']) and key['lens'] > 0, f'{sid}: invalid keyed lens')
+                need(set(key) <= {'frame', 'position', 'target', 'lens'}, f'{sid}: unsupported camera key property')
+            if isinstance(ck, list) and ck:
+                need(isinstance(ck[0], dict) and ck[0].get('frame') == 1, f'{sid}: first camera key must be frame 1')
+        for obj in objects:
+            if not isinstance(obj, dict): continue
+            need(obj.get('interpolation', 'linear') in ('linear', 'smooth'), f'{sid}: invalid object interpolation')
+            for key in obj.get('keys', []) if isinstance(obj.get('keys'), list) else []:
+                if isinstance(key, dict): need(set(key) <= {'frame', 'position', 'rotation'}, f'{sid}: unsupported object key property')
+            windows = obj.get('ground_contact', [])
+            need(isinstance(windows, list), f'{sid}: ground_contact must be a list')
+            for w in windows if isinstance(windows, list) else []:
+                need(isinstance(w, list) and len(w) == 2 and all(integer(x) for x in w)
+                     and integer(n) and 1 <= w[0] <= w[1] <= n, f'{sid}: invalid ground contact window')
+        audit = shot.get('audit', {})
+        if not isinstance(audit, dict): errors.append('audit must be an object'); audit = {}
+        need(integer(audit.get('step', 1)), f'{sid}: audit step must be positive integer')
+        need(finite(audit.get('margin', 0)) and 0 <= audit.get('margin', 0) < .5, f'{sid}: invalid frame margin')
+        need(finite(audit.get('ground_z', 0)), f'{sid}: invalid ground height')
+        need(finite(audit.get('tolerance', .05)) and audit.get('tolerance', .05) >= 0, f'{sid}: invalid ground tolerance')
+        subjects = audit.get('subjects', [])
+        need(isinstance(subjects, list) and all(isinstance(x, str) and x in ids for x in subjects), f'{sid}: unknown audit subject')
+        if not errors:
+            from motion import camera_at
+            for frame in range(1, n + 1):
+                state = camera_at(shot, frame)
+                distance = sum((a - b) ** 2 for a, b in zip(state['position'], state['target']))
+                if distance < 1e-12:
+                    errors.append(f'{sid}: camera coincides with target at frame {frame}')
+                    break
     return errors
 
 

@@ -1,11 +1,13 @@
 import copy
 import importlib.util
 import json
+import sys
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/video-previs-workflow/scripts'
+sys.path.insert(0, str(SCRIPTS))
 
 def module(name):
     path = SCRIPTS / (name + '.py')
