@@ -1,0 +1,17 @@
+{
+  "version": 1, "fps": 24, "width": 360, "height": 640,
+  "shots": [{
+    "id": "s01", "frames": 48,
+    "camera": {"position": [6, -9, 5], "target": [0, 0, 1]},
+    "objects": [
+      {"id": "ground", "shape": "cube", "scale": [5, 3, 0.1], "color": [0.6, 0.55, 0.4],
+       "keys": [{"frame": 1, "position": [0, 0, -0.1]}]},
+      {"id": "hero", "shape": "sphere", "scale": [0.5, 0.5, 0.5], "color": [0.2, 0.7, 0.6],
+       "keys": [{"frame": 1, "position": [-2, 0, 0.5]}, {"frame": 12, "position": [-1, 0, 0.5]},
+                {"frame": 24, "position": [0, 0, 2]}, {"frame": 36, "position": [1, 0, 0.5]},
+                {"frame": 48, "position": [2, 0, 0.5]}]},
+      {"id": "house", "shape": "cube", "scale": [0.8, 0.8, 1], "color": [0.65, 0.35, 0.25],
+       "keys": [{"frame": 1, "position": [0, 2, 1]}]}
+    ]
+  }]
+}
