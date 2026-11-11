@@ -19,14 +19,14 @@ The forward evaluator initially saw a partially written directory and reported a
 
 ## Not executed / not claimed
 
-- Blender rendering: Blender was not installed at the checked executable locations.
+- Blender rendering: initial checks lacked Blender; the runtime verification below supersedes that initial limitation.
 - FFmpeg encoding, assembly, audio/subtitle muxing and decode smoke tests: ffmpeg/ffprobe unavailable.
-- Live Higgsfield MCP discovery/authentication, uploads, paid calls, generation quality and lip sync.
-- Claude Code and Codex live discovery/invocation: directory-layout tests do not prove host discovery.
+- Live Higgsfield authentication, uploads, paid calls, generation quality and lip sync remain unverified. Installed/enabled plugin status is verified, but read-only calls returned `Unknown tool` in this host.
+- Codex skill discovery and installed-resource invocation are now verified; Claude Code live invocation remains unverified.
 - `npx skills add` installer execution: documented installation route, not tested here.
 - Windows/Linux runtime behavior.
 
-The renderer and media helper require real runtime smoke tests before production reliance. The renderer targets Blender 4.2+ EEVEE Next; version compatibility has not been proven. No frame-identical AI motion is promised.
+The media helper still requires real FFmpeg smoke tests. Blender 5.3.0 is now tested as described below; other Blender releases remain untested. No frame-identical AI motion is promised.
 
 ## Next production smoke test
 
@@ -52,3 +52,11 @@ Behavior change: previous implicit Bezier motion becomes explicit linear by defa
 Reference reviewed: Scenario Labs' blockout skill and its MIT license. This update uses independently written helpers and introduces no Scenario package or service dependency. No upstream code is bundled.
 
 Independent review found two camera override bugs: an unused malformed target crashed follow-camera sampling, and a base coincident target was rejected even when frame-1 keys/follow provided a valid target. Both were reproduced in tests and fixed. Final suite: 18 passed, 1 Blender integration test explicitly skipped. Omitted object rotation now holds the previous pose; the migration note documents the change.
+
+## Blender 5.3.0 runtime verification
+
+Actual installation reported Blender 5.3.0. The previously skipped integration test first failed because this release exposes `BLENDER_EEVEE` instead of the hardcoded `BLENDER_EEVEE_NEXT`. The renderer now selects the supported EEVEE identifier from RNA; it fails explicitly if neither exists. On restricted macOS execution, Metal initialization and thumbnail/cache writes were denied; the same test passed with host-approved GPU/cache access.
+
+After the fix, all 19 tests pass, including real PNG renders, audit output and reopening the saved .blend to check final-frame camera position and lens. No skips. A separate full 48-frame, 24 FPS, 360×640 tracking-jump render completed. Its configured framing/center-ray/contact checks covered all 48 integer frames and returned no findings. Frames 1, 24 and 48 were visually inspected; the entire sequence has not been visually reviewed or encoded into MP4.
+
+The user-installed Codex skill has been discovered in a live turn. Local `ffmpeg` and `ffprobe` remain unavailable, so media-helper encoding/muxing is still untested. Higgsfield is installed and enabled according to plugin discovery, but read-only profile/model calls returned `Unknown tool`; no provider account, model availability, upload or paid generation was verified and no credits were used.

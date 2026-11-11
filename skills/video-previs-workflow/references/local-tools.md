@@ -1,6 +1,6 @@
 # Local helpers
 
-Use Python 3.10+; helpers have no pip dependencies. Blender rendering requires Blender 4.2+ with EEVEE Next (actual tested versions are recorded in the repository validation report). Media operations require `ffmpeg`, `ffprobe`, libx264; selectable subtitle export uses mov_text. Do not claim compatibility with untested releases. `doctor.py` reports availability, not version compatibility or provider connectivity.
+Use Python 3.10+; helpers have no pip dependencies. Blender rendering requires an EEVEE-capable Blender build (4.2+ interface; 5.3.0 tested) (actual tested versions are recorded in the repository validation report). Media operations require `ffmpeg`, `ffprobe`, libx264; selectable subtitle export uses mov_text. The renderer discovers the EEVEE engine identifier from Blender RNA (`BLENDER_EEVEE_NEXT` or `BLENDER_EEVEE`) and errors if neither exists. Do not claim compatibility with untested releases. `doctor.py` reports availability, not version compatibility or provider connectivity.
 
 Resolve `SKILL_DIR` to the installed folder; below it is a shell variable set by the agent to the actual path. Quote all paths. Project files live outside this directory.
 
@@ -13,6 +13,8 @@ python3 "$SKILL_DIR/scripts/media.py" extract previs/s01.mp4 review-frames --eve
 python3 "$SKILL_DIR/scripts/media.py" assemble edit.json output/final.mp4
 python3 "$SKILL_DIR/scripts/media.py" probe output/final.mp4
 ```
+
+On restricted macOS hosts, EEVEE needs access to Metal GPU and Blender cache/thumbnail directories; a sandbox may deny these. Use the host approval mechanism for this render rather than treating a Metal initialization failure as a scene error.
 
 On macOS the Blender executable may be `/Applications/Blender.app/Contents/MacOS/Blender`. Use the discovered path. Render/extract destinations must not exist; media outputs reject overwrites. Use a new revision for edits. If a command fails after writing partial output, inspect it and choose a new revision rather than pretending it succeeded.
 

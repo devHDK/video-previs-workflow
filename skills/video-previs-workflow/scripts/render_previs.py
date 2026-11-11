@@ -40,7 +40,11 @@ def build_shot(bpy, spec, shot):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = 'METRIC'
-    scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    engines = scene.render.bl_rna.properties['engine'].enum_items.keys()
+    engine = next((name for name in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE') if name in engines), None)
+    if engine is None:
+        raise RuntimeError('This Blender build has no supported EEVEE engine.')
+    scene.render.engine = engine
     scene.render.resolution_x = spec['width']; scene.render.resolution_y = spec['height']
     scene.render.resolution_percentage = 100
     scene.render.fps = spec['fps']; scene.render.fps_base = 1.0
