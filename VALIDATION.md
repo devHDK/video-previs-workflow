@@ -82,3 +82,17 @@ Trigger: a request to reproduce another video's composition, action and timing w
 - `media.py cuts` was run through the installed skill path on the same file: the stills next to each cut sample their own shot (red, test pattern, green).
 
 Not verified: real-world footage with dissolves or fast motion (the threshold is a proposal and needs review), event timing beyond manual frame reading, and provider motion control fed with a reference clip.
+
+## 2026-11-12 manual web handoff
+
+Trigger: Higgsfield plan Unlimited applies only to manual generation on higgsfield.ai. Its help center says MCP, CLI and other automated generations always deduct credits, which matches ep01 (MCP, 198.5 credits) against 0-credit web generations on the same account. The skill assumed MCP submission and had no handoff format.
+
+- `handoff.py pack` (job.json → `NN-<slot>.<ext>` uploads, `request.md`, empty `output/`, input hashes) and `ingest` (one non-hidden result, kind and decode check, refuse overwrite, hash/size/duration/fps). `gate.py` now accepts `max_shot_quote: 0` with `retry_reserve: 0` for all-web-Unlimited plans, and a job quoted above 0 is still rejected. Docs add the manual route, the `handed_off` job state and a ban on automating provider web apps. Each new test was run red before its implementation. The suite has 104 passing tests.
+- While running the tests, ffprobe exited 0 on a corrupt PNG, reporting 0×0 and decoding no frames. `ingest` now requires a decoded frame and nonzero dimensions.
+- Rehearsal on `../projects/scalp-immigration-ep01-v2` (s01 start keyframe job, Seedream 5.0 Lite, 5 inputs: previs v003 f1 plus the traveler, purple, amber and cabin images):
+  - `pack` printed 5 hashes and a readable `request.md`.
+  - `ingest` of a dropped PNG returned 360×640 with a matching hash.
+  - A second `ingest` to the same destination exited 1.
+  - `state.json` hash was unchanged (02372f13… before and after).
+
+Not verified: an actual web generation and its ingest, slot names on the real provider screen, and video ingest of a provider-made MP4 (covered only by a synthetic ffmpeg clip).
