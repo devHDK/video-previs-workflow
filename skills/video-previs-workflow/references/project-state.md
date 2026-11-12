@@ -29,6 +29,7 @@ Maintain these fields (JSON or equivalent structured text):
 - `previs`: spec_path/hash, render_path/hash, approval status, approved revision, evidence and time.
 - `assets[]`: role_id, source, original_path/hash, working_path/hash, `sha256` (the working file bound to shots), version, approval status/evidence/time, shot_ids.
 - `shots[]`: id, frames, `required_events` (mandatory, nonempty), `object_roles` (every previs object id → role_id or `null`), `asset_bindings` (role_id, version, sha256), `keyframes[]` (kind `start`/`end`, path, sha256, approval), previs revision, selected output, stale reason, QA status.
+- `continuity[]`: role_id, `keyframe_sha256` (shot → hash of the approved start keyframe reviewed), approval, evidence. Required for every role used by two or more shots.
 - `budget`: currency or credit unit, approved scope, cap, max_attempts, `retry_reserve`, `max_shot_quote`, approval evidence, settled cost, reserved cost, attempts used. State whether quote includes image, voice, video, lip-sync, and paid retries.
 - `jobs[]`: local request ID, `route` (`mcp` default or `manual`), host, shot/asset target, tool/model, parameters, reference hashes, `start_frame_sha256`, `retry_of` for retries, quote with timestamp, reservation, submitted_at, provider_job_id, status, actual charge, output paths, error/recovery evidence.
 - `handoff`: blockers, next unpaid action, next paid action, unresolved jobs, unverified outputs.
