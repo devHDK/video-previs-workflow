@@ -28,4 +28,10 @@ Build a per-shot request from approved story/action, camera, asset bindings, sta
 
 Poll/retrieve using the provider's returned job ID, respecting its polling guidance. Download and inspect the actual output. Link results to request and input versions. A tool reporting success does not establish visual quality. Retry only failed requirements within the agreed cap/attempt limit. Reuse successful shots; if a shot needs changed direction or appearance, reopen the relevant creative approval.
 
+## Manual route
+
+Some allowances apply only when a person generates in the provider's web app (Higgsfield plan Unlimited, for example: MCP, CLI and other automated generations always deduct credits). When a job could use one, show the MCP quote beside the expected web charge (0 under Unlimited) and let the user choose `route: manual` or `mcp` per job. Never automate the web app to reach a web-only allowance: no browser automation, scripted clicks or reused session cookies.
+
+For a manual job, write `job.json` with `route: "manual"`, `provider`, `model` as the web app names it, `settings`, `inputs[]` (`path`, `slot`, `purpose`), `prompt` and `output` (`kind`, `notes`). Take slot names from the user's screen or screenshot; do not hardcode them. Video jobs pass `gate.py submit` first, as on MCP. Run `handoff.py pack job.json handoff/<request_id>` from the project directory, record the printed input hashes and set the job to `handed_off`. After the user drops one result into `output/`, run `handoff.py ingest` to the normal destination (`shots/<shot>/<attempt>/source.mp4`, the keyframe or asset path), record `sha256`, `host`, and `actual_charge` as the user confirms (unknown keeps the reservation), then inspect and approve exactly as for MCP output. A `handed_off` job is unresolved: do not resubmit the same target by another route until it is ingested or cancelled.
+
 On timeout/unknown submission, search provider job history and billing using request ID/time/parameters. Never immediately resubmit from a second host. Stop when budget is exhausted and present the best actual outputs plus unresolved requirements.

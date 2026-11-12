@@ -30,7 +30,7 @@ Maintain these fields (JSON or equivalent structured text):
 - `assets[]`: role_id, source, original_path/hash, working_path/hash, `sha256` (the working file bound to shots), version, approval status/evidence/time, shot_ids.
 - `shots[]`: id, frames, `required_events` (mandatory, nonempty), `object_roles` (every previs object id → role_id or `null`), `asset_bindings` (role_id, version, sha256), `keyframes[]` (kind `start`/`end`, path, sha256, approval), previs revision, selected output, stale reason, QA status.
 - `budget`: currency or credit unit, approved scope, cap, max_attempts, `retry_reserve`, `max_shot_quote`, approval evidence, settled cost, reserved cost, attempts used. State whether quote includes image, voice, video, lip-sync, and paid retries.
-- `jobs[]`: local request ID, host, shot/asset target, tool/model, parameters, reference hashes, `start_frame_sha256`, `retry_of` for retries, quote with timestamp, reservation, submitted_at, provider_job_id, status, actual charge, output paths, error/recovery evidence.
+- `jobs[]`: local request ID, `route` (`mcp` default or `manual`), host, shot/asset target, tool/model, parameters, reference hashes, `start_frame_sha256`, `retry_of` for retries, quote with timestamp, reservation, submitted_at, provider_job_id, status, actual charge, output paths, error/recovery evidence.
 - `handoff`: blockers, next unpaid action, next paid action, unresolved jobs, unverified outputs.
 
 Budget approvals and creative approvals are separate. Never fill an approval record on behalf of the user without conversation evidence.
@@ -38,6 +38,8 @@ Budget approvals and creative approvals are separate. Never fill an approval rec
 ## Submission state machine
 
 `prepared -> reserved -> submitting -> running -> succeeded | failed | cancelled`
+
+Manual route: `prepared -> reserved -> handed_off -> succeeded | failed | cancelled`. A `handed_off` job is unresolved like a running one.
 
 Any interruption after submission may become `unknown`; it is not a terminal failure. Persist a unique local request ID and reserve the maximum credible charge **before** submission. Store provider job ID as soon as returned. A failed or rejected attempt still consumes an attempt and may consume credits. Resolve actual billing before releasing a reservation.
 
