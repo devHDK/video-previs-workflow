@@ -193,13 +193,21 @@ def check_submission(state, job, root):
     """One paid job: its shot must be ready and the job must not eat the retry reserve unless it is a retry."""
     if not isinstance(state, dict) or not isinstance(job, dict): return ['state and job must be objects']
     sid = job.get('shot')
-    shot = next((s for s in _list(state.get('shots')) if isinstance(s, dict) and s.get('id') == sid), None)
+    by_id = {s.get('id'): s for s in _list(state.get('shots')) if isinstance(s, dict)}
+    shot = by_id.get(sid) if isinstance(sid, str) else None
     if shot is None: return [f'{sid}: shot not found in state']
+    covered = job.get('shots', [sid])  # a sequence take covers consecutive shots and starts on the first one's keyframe
+    if not (isinstance(covered, list) and covered and covered[0] == sid): return ['job: shots must begin with shot']
     errors = story_errors(state, root)
     if _dict(state.get('previs')).get('approval') != 'approved': errors.append('previs: approval required')
     spec_errors, objects = spec_objects(state, root)
-    errors += spec_errors + shot_errors(state, shot, [] if spec_errors else objects.get(sid), root)
-    errors += continuity_errors(state, {r for r in _dict(shot.get('object_roles')).values() if isinstance(r, str)})
+    errors += spec_errors
+    roles = set()
+    for cid in covered:
+        if not isinstance(cid, str) or cid not in by_id: errors.append(f'{cid}: shot not found in state'); continue
+        errors += shot_errors(state, by_id[cid], [] if spec_errors else objects.get(cid), root)
+        roles |= {r for r in _dict(by_id[cid].get('object_roles')).values() if isinstance(r, str)}
+    errors += continuity_errors(state, roles)
     start = approved_start_sha(shot)
     if start is not None and job.get('start_frame_sha256') != start:
         errors.append(f'{sid}: job start frame is not the approved keyframe')

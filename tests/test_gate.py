@@ -416,5 +416,34 @@ class GateContinuityTests(unittest.TestCase):
         e = self.g.check_submission(self.state, job, self.root)
         self.assertIn('continuity: role hero needs an approved cross-shot keyframe review', e)
 
+
+
+class GateSequenceJobTests(unittest.TestCase):
+    """A sequence take covers consecutive shots: submit checks every covered shot, the start frame is the first shot's."""
+    tearDown = GateContinuityTests.tearDown
+
+    def setUp(self):
+        GateContinuityTests.setUp(self)  # same two-shot project, without inheriting its tests
+        self.state['continuity'] = [self.review('hero'), self.review('slide')]
+        self.job = {'shot': 's01', 'shots': ['s01', 's02'], 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+
+    def sub(self):
+        return self.g.check_submission(self.state, self.job, self.root)
+
+    def test_sequence_job_passes_when_all_shots_ready(self):
+        self.assertEqual(self.sub(), [])
+
+    def test_sequence_job_checks_every_covered_shot(self):
+        self.state['shots'][1]['required_events'] = []
+        self.assertIn('s02: required_events missing', self.sub())
+
+    def test_sequence_job_unknown_shot(self):
+        self.job['shots'] = ['s01', 's09']
+        self.assertIn('s09: shot not found in state', self.sub())
+
+    def test_sequence_must_begin_with_shot(self):
+        self.job['shots'] = ['s02', 's01']
+        self.assertIn('job: shots must begin with shot', self.sub())
+
 if __name__ == '__main__':
     unittest.main()
