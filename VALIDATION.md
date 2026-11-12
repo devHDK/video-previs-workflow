@@ -118,3 +118,19 @@ Trigger: on ep01-v2, start keyframes generated from per-shot prompts drifted bet
   - The rows show one floor, light and character design across the village shots.
 
 Not verified: video takes against the boundary check (none generated yet). Rows also include shots where a role enters only after frame 1 (for example the stowaways in s02). That frame cannot show the role, so its consistency is checked only in the take.
+
+## 2026-11-12 sequence takes and staged handoff folders
+
+Trigger: on ep01-v2 the first three web takes (Seedance 2.5, 0 credits) were each generated from an independently composed keyframe. Inside the village, the s02→s03 cut jumped in camera and character positions. s03 also raised the slide and tent on the opposite sides from the previs and the approved s05/s06 keyframes, because those props rise mid-shot and nothing fixed their place. The cabin→village cut (a location change) read naturally.
+
+- `generation.md` adds sequence takes for consecutive same-location shots:
+  - Start from the first shot's approved keyframe.
+  - Use later shots' keyframes as "how the scene looks at T s" references.
+  - Use concatenated previs clips as the motion reference, with offset event times.
+  - Name the fixed prop positions.
+  - Request a duration within the model limits (web minimum 4 s).
+  - `delivery.md` cuts one clip per shot from the same source by in-point.
+- `gate.py submit` accepts `shots` (covered shot ids, beginning with `shot`) and checks every covered shot and its roles' continuity. Tests for an unready covered shot, an unknown shot and a wrong first shot were run red before the change, and the suite passes.
+- Handoff folders are now staged (`handoff/assets|keyframes|videos/<id>`). The ep01-v2 folders were moved and `jobs[].pack_path` updated (16 folders). No unprocessed results were present.
+
+Not verified: the sequence takes themselves (seq-s02-s03 and seq-s05-s06 are packed and waiting for web generation), including whether Seedance 2.5 keeps the 19 s discovery at 6.0 s inside an 8 s take.
