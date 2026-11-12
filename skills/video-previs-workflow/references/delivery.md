@@ -15,7 +15,7 @@ For each shot build `media.py pair PREVIS TAKE sheet.jpg` (previs row over take 
 - Composition against keyframe and previs: shot size, camera height, start and end framing.
 - Every entry in the shot's `required_events`.
 - Prop continuity across shots: the same prop keeps the same structure, material and colour wherever it appears.
-- Boundaries: for consecutive shots that share a set role, extract the last frame of one take and the first frame of the next (`media.py extract`) and compare floor, light, set dressing and character positions; report differences as defects.
+- Boundaries: for consecutive shots that share a set role, extract the last frame of one take and the first frame of the next (`ffmpeg -sseof -0.1 -i A.mp4 -update 1 a_last.png` and `ffmpeg -i B.mp4 -frames:v 1 b_first.png`; `media.py extract` samples at an interval and can miss the final second) and compare floor, light, set dressing and character positions; report differences as defects.
 - Identity, silhouette/clothes, props, entity counts and scale, and background continuity.
 - Event order, contact/occlusion, motion direction, camera movement and entry/exit state.
 - Timing drift, frozen/padded frames and unintended cuts.

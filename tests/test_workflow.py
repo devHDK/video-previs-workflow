@@ -159,7 +159,7 @@ class ContinuityTests(unittest.TestCase):
                                   ('k3b', 'white', '90x160'), ('k4', 'gray', '90x160'), ('wide', 'yellow', '160x90')):
             subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'color=c={color}:s={size}', '-frames:v', '1',
                             str(self.root / f'{name}.png')], check=True)
-        key = lambda p, a: {'kind': 'start', 'path': p, 'approval': a}
+        key = lambda p, a: {'kind': 'start', 'path': p, 'approval': a, 'sha256': 'h' + p[1:-4]}
         self.state = {'shots': [
             {'id': 's01', 'object_roles': {'hero': 'hero', 'seat': 'cabin'}, 'keyframes': [key('k1.png', 'approved')]},
             {'id': 's02', 'object_roles': {'hero': 'hero', 'house_0': 'village'}, 'keyframes': [key('k2.png', 'approved')]},
@@ -191,6 +191,7 @@ class ContinuityTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.state))
         rows = self.m.continuity(self.path, self.root / 'sheet.png')
         self.assertEqual([r['role'] for r in rows], ['hero', 'village'])
+        self.assertEqual(rows[1]['keyframe_sha256'], {'s02': 'h2', 's03': 'h3'})  # what was shown, ready to copy into a review
         stream = self.m.probe(self.root / 'sheet.png')['streams'][0]
         self.assertEqual((stream['width'], stream['height']), (810, 960))
 

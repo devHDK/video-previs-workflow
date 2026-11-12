@@ -135,8 +135,8 @@ def continuity_rows(state):
         key = current_keyframe(shot)
         if key is None: continue
         for role in dict.fromkeys(r for r in (shot.get('object_roles') or {}).values() if isinstance(r, str)):
-            row = rows.setdefault(role, {'role': role, 'shots': [], 'paths': []})
-            row['shots'].append(shot['id']); row['paths'].append(key['path'])
+            row = rows.setdefault(role, {'role': role, 'shots': [], 'paths': [], 'keyframe_sha256': {}})
+            row['shots'].append(shot['id']); row['paths'].append(key['path']); row['keyframe_sha256'][shot['id']] = key.get('sha256')
     return [r for r in rows.values() if len(r['shots']) > 1]
 
 
@@ -157,7 +157,7 @@ def continuity(state_path, output):
     graph.append(''.join(f'[r{i}]' for i in range(len(rows))) + (f'vstack={len(rows)}' if len(rows) > 1 else 'null'))
     run(['ffmpeg', '-v', 'error', '-n', *[x for p in paths for x in ('-i', state_path.parent / p)],
          '-filter_complex', ';'.join(graph), '-frames:v', '1', output])
-    return [{'role': r['role'], 'shots': r['shots']} for r in rows]
+    return [{'role': r['role'], 'shots': r['shots'], 'keyframe_sha256': r['keyframe_sha256']} for r in rows]
 
 
 def parse_cut_times(log):

@@ -348,8 +348,6 @@ class GateSubmissionTests(unittest.TestCase):
         self.assertTrue(self.g.check_project(self.state, self.root))
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class GateContinuityTests(unittest.TestCase):
@@ -403,7 +401,20 @@ class GateContinuityTests(unittest.TestCase):
         self.state['continuity'] = [self.review('hero')]
         self.assertEqual([e for e in self.errors() if e.startswith('continuity')], [])
 
+    def test_unapproved_keyframe_cannot_be_reviewed(self):
+        self.state['shots'][1]['keyframes'][0]['approval'] = 'pending'
+        hero = self.review('hero'); hero['keyframe_sha256']['s02'] = None
+        slide = self.review('slide'); slide['keyframe_sha256']['s02'] = None
+        self.state['continuity'] = [hero, slide]
+        msg = 'continuity: role hero cannot be reviewed until every shot using it has an approved keyframe (s02)'
+        self.assertIn(msg, self.errors())
+        job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        self.assertIn(msg, self.g.check_submission(self.state, job, self.root))
+
     def test_submit_checks_roles_of_its_shot(self):
         job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
         e = self.g.check_submission(self.state, job, self.root)
         self.assertIn('continuity: role hero needs an approved cross-shot keyframe review', e)
+
+if __name__ == '__main__':
+    unittest.main()

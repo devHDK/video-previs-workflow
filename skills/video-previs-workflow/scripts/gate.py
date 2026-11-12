@@ -155,7 +155,11 @@ def continuity_errors(state, roles=None):
     for role, shas in uses.items():
         if len(shas) < 2 or (roles is not None and role not in roles): continue
         review = reviews.get(role)
-        if not review or review.get('approval') != 'approved':
+        missing = [sid for sid, sha in shas.items() if sha is None]
+        if missing:  # a null hash in a review must never stand in for an unapproved frame
+            errors.append(f"continuity: role {role} cannot be reviewed until every shot using it has an approved keyframe "
+                          f"({', '.join(missing)})")
+        elif not review or review.get('approval') != 'approved':
             errors.append(f'continuity: role {role} needs an approved cross-shot keyframe review')
         elif _dict(review.get('keyframe_sha256')) != shas:
             errors.append(f'continuity: role {role} review is stale (keyframes changed)')
