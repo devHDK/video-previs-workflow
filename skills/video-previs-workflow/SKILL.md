@@ -5,7 +5,7 @@ description: Use when producing or revising a video from an idea, script, storyb
 
 # Video previs workflow
 
-Establish direction with a reviewable previs, then approve actual appearance images before generating final shots. Deliver an edited MP4 and resumable production records. Respond in the user's language. Support new, supplied, and mixed assets; do not require source footage or another skill.
+Lock the story's purpose first, establish direction with a reviewable previs, approve actual appearance images and per-shot keyframes, then generate final shots. Deliver an edited MP4 and resumable production records. Respond in the user's language. Support new, supplied, and mixed assets; do not require source footage or another skill.
 
 ## Start or resume
 
@@ -15,12 +15,14 @@ Read existing records and user decisions before asking questions. Resume the lat
 
 ## Production checkpoints
 
-1. **Previs:** Block story, action, camera and timing in Blender. Use [local-tools.md](references/local-tools.md). Render and inspect actual frames/video, then show them for approval. Record the exact spec/render revision approved. If source footage is inaccessible, say what was not observed.
-2. **Appearance:** Prepare actual character/person, background, prop and product image files. Generate, edit or reuse supplied images per asset. Show files for review and record approved versions separately from previs approval. A prompt list or proxy render does not satisfy this checkpoint. Retain originals. Structural changes return affected shots to previs review.
-3. **Generation:** Read [generation.md](references/generation.md). Bind approved asset versions and previs to each shot, discover supported inputs, submit within the approved job budget, retrieve outputs and inspect them. Approval to author a skill or previs is not a paid-generation budget.
-4. **Edit and QA:** Read [delivery.md](references/delivery.md). Conform clips to the timeline, add agreed speech, sound effects and subtitles, apply lip sync where needed, and verify the final MP4. Retain intermediate artifacts and report unresolved defects.
+0. **Story:** Before previs, obtain an approved story design: core purpose, target viewer action and a structure chosen for both, with timed beats. Use the `story-design` skill if it is installed; otherwise meet the minimum in production.md. Record path, hash and approval in state.
+1. **Previs:** Block story, action, camera and timing in Blender. Use [local-tools.md](references/local-tools.md). Meet the proxy minimums in production.md. When a storyboard or reference exists, show a side-by-side sheet (panel ↔ previs frame) and list every dropped or changed panel as a decision for approval. Render and inspect actual frames/video, then show them for approval. Record the exact spec/render revision approved. If source footage is inaccessible, say what was not observed.
+2. **Appearance:** Prepare actual image files for every role in each shot's `object_roles`: characters/people, sets, recurring props and products. Props whose structure matters get a structure view. Generate, edit or reuse supplied images per asset. Show files for review and record approved versions separately from previs approval. A prompt list or proxy render does not satisfy this checkpoint. Retain originals. Structural changes return affected shots to previs review.
+3. **Shot keyframes:** Compose an approved start frame per shot (and end frame when the tool supports it) from the previs frame and approved assets; review each beside its previs frame. Character sheets and control videos do not carry composition.
+4. **Generation:** Read [generation.md](references/generation.md). Bind approved asset versions, keyframes and previs to each shot, discover supported inputs, submit within the approved job budget, retrieve outputs and inspect them. Run `scripts/gate.py ready` before the first paid video call and `scripts/gate.py submit` for every job; do not submit while it reports errors. Approval to author a skill or previs is not a paid-generation budget.
+5. **Edit and QA:** Read [delivery.md](references/delivery.md). Conform clips to the timeline, add agreed speech, sound effects and subtitles, apply lip sync where needed, and verify the final MP4. Compare every take with its previs using `media.py pair`. Retain intermediate artifacts and report unresolved defects.
 
-There are two creative checkpoints, not a new permission request per tool call. Reuse explicit approvals for unchanged versions. A changed approved decision reopens its affected checkpoint. Before the first paid image, voice, video or lip-sync call, obtain one job-wide scope, cost cap and attempt limit; continue within it without repeated authorization.
+Creative checkpoints are story, previs, appearance and keyframes; batch each into one review, not a permission request per tool call. Reuse explicit approvals for unchanged versions. A changed approved decision reopens its affected checkpoint. Before the first paid image, voice, video or lip-sync call, obtain one job-wide scope, cost cap, attempt limit and a retry reserve covering at least one retry of the most expensive shot; continue within it without repeated authorization.
 
 ## Reliability
 

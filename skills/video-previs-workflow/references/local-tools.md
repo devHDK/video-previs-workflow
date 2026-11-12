@@ -10,9 +10,14 @@ python3 "$SKILL_DIR/scripts/validate_spec.py" scene-v001.json
 blender --background --factory-startup --python-exit-code 1 --python "$SKILL_DIR/scripts/render_previs.py" -- scene-v001.json previs/v001
 python3 "$SKILL_DIR/scripts/media.py" encode 'previs/v001/s01/frame_%04d.png' previs/s01.mp4 --fps 24
 python3 "$SKILL_DIR/scripts/media.py" extract previs/s01.mp4 review-frames --every 0.5
+python3 "$SKILL_DIR/scripts/media.py" pair previs/s01.mp4 shots/s01/v001/source.mp4 qa/s01-pair.jpg --points 5
 python3 "$SKILL_DIR/scripts/media.py" assemble edit.json output/final.mp4
 python3 "$SKILL_DIR/scripts/media.py" probe output/final.mp4
+python3 "$SKILL_DIR/scripts/gate.py" ready state.json
+python3 "$SKILL_DIR/scripts/gate.py" submit state.json shots/s01/v002/job.json
 ```
+
+`gate.py` reads project state and never edits it. `ready` checks the whole project before the first paid video call: approved, unchanged story file; previs approval; `required_events` and an `object_roles` decision for every previs object; an approved asset bound per role; an approved, unchanged start keyframe per shot; `retry_reserve ≥ max_shot_quote`. `submit` checks one job (`shot`, `quote`, `start_frame_sha256`, optional `retry_of`) against its shot and the remaining budget. Both print `OK` (exit 0) or one error per line (exit 1).
 
 On restricted macOS hosts, EEVEE needs access to Metal GPU and Blender cache/thumbnail directories; a sandbox may deny these. Use the host approval mechanism for this render rather than treating a Metal initialization failure as a scene error.
 
@@ -57,10 +62,12 @@ Paths are relative to the manifest. Clip order is the edit order, and each durat
 ```json
 {
   "fps": 24, "width": 360, "height": 640,
-  "clips": [{"path": "shots/s01.mp4", "frames": 48}],
+  "clips": [{"path": "shots/s01.mp4", "frames": 48},
+            {"path": "shots/s02.mp4", "frames": 72, "start": 0.5, "speed": 1.05},
+            {"path": "shots/s03.mp4", "frames": 48, "dialogue": true}],
   "audio": "audio/mix.wav",
   "subtitles": "edit/captions.srt"
 }
 ```
 
-Omit `audio`/`subtitles` if not requested. The helper normalizes/re-encodes clips, removes their audio, pads short clips, adds a prepared audio mix and selectable captions, verifies output frame count and decodes the MP4. It is a finishing helper, not an automatic dialogue/SFX mixer or lip-sync system. Inspect/approve padding and prepare the mix separately. `media.py --help` lists subcommands.
+Optional clip keys: `start` (seconds into the source, ≥ 0), `speed` (0.9–1.1, default 1) and `dialogue` (true forbids any speed change). The assembler rejects values outside these limits before encoding. Omit `audio`/`subtitles` if not requested. The helper normalizes/re-encodes clips, removes their audio, pads short clips, adds a prepared audio mix and selectable captions, verifies output frame count and decodes the MP4. It is a finishing helper, not an automatic dialogue/SFX mixer or lip-sync system. Inspect/approve padding and prepare the mix separately. `media.py --help` lists subcommands.

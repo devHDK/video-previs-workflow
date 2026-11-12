@@ -24,11 +24,12 @@ Maintain these fields (JSON or equivalent structured text):
 
 - `project_id`, `revision`, `stage`, `updated_at`, `active_host`.
 - `output`: width, height, fps, total_frames, audio/subtitle requirements.
+- `story`: path, sha256, approval status, evidence and time (`approved_at`). Required before previs.
 - `previs`: spec_path/hash, render_path/hash, approval status, approved revision, evidence and time.
-- `assets[]`: role_id, source, original_path/hash, working_path/hash, version, approval status/evidence/time, shot_ids.
-- `shots[]`: id, frames, required_events, asset role/version bindings, previs revision, selected output, stale reason, QA status.
-- `budget`: currency or credit unit, approved scope, cap, max_attempts, approval evidence, settled cost, reserved cost, attempts used. State whether quote includes image, voice, video, lip-sync, and paid retries.
-- `jobs[]`: local request ID, host, shot/asset target, tool/model, parameters, reference hashes, quote with timestamp, reservation, submitted_at, provider_job_id, status, actual charge, output paths, error/recovery evidence.
+- `assets[]`: role_id, source, original_path/hash, working_path/hash, `sha256` (the working file bound to shots), version, approval status/evidence/time, shot_ids.
+- `shots[]`: id, frames, `required_events` (mandatory, nonempty), `object_roles` (every previs object id → role_id or `null`), `asset_bindings` (role_id, version, sha256), `keyframes[]` (kind `start`/`end`, path, sha256, approval), previs revision, selected output, stale reason, QA status.
+- `budget`: currency or credit unit, approved scope, cap, max_attempts, `retry_reserve`, `max_shot_quote`, approval evidence, settled cost, reserved cost, attempts used. State whether quote includes image, voice, video, lip-sync, and paid retries.
+- `jobs[]`: local request ID, host, shot/asset target, tool/model, parameters, reference hashes, `start_frame_sha256`, `retry_of` for retries, quote with timestamp, reservation, submitted_at, provider_job_id, status, actual charge, output paths, error/recovery evidence.
 - `handoff`: blockers, next unpaid action, next paid action, unresolved jobs, unverified outputs.
 
 Budget approvals and creative approvals are separate. Never fill an approval record on behalf of the user without conversation evidence.
