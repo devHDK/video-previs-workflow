@@ -117,6 +117,49 @@ def pair(top, bottom, output, points=5):
         run(['ffmpeg', '-v', 'error', '-n', *inputs, '-filter_complex', rows, output])
 
 
+CELL = 'scale=270:480:force_original_aspect_ratio=decrease,pad=270:480:(ow-iw)/2:(oh-ih)/2,setsar=1'
+
+
+def current_keyframe(shot):
+    """The approved start keyframe, else the latest pending one, else None."""
+    starts = [k for k in shot.get('keyframes') or [] if isinstance(k, dict) and k.get('kind') == 'start']
+    approved = [k for k in starts if k.get('approval') == 'approved']
+    pending = [k for k in starts if k.get('approval') == 'pending']
+    return approved[0] if approved else (pending[-1] if pending else None)
+
+
+def continuity_rows(state):
+    """One row per role used by 2+ shots that have a current keyframe, in first-appearance order."""
+    rows = {}
+    for shot in state.get('shots') or []:
+        key = current_keyframe(shot)
+        if key is None: continue
+        for role in dict.fromkeys(r for r in (shot.get('object_roles') or {}).values() if isinstance(r, str)):
+            row = rows.setdefault(role, {'role': role, 'shots': [], 'paths': []})
+            row['shots'].append(shot['id']); row['paths'].append(key['path'])
+    return [r for r in rows.values() if len(r['shots']) > 1]
+
+
+def continuity(state_path, output):
+    """Contact sheet: a row of current keyframes for every role shared by 2+ shots. Returns the row legend."""
+    state_path = Path(state_path).resolve()
+    rows = continuity_rows(json.loads(state_path.read_text()))
+    if not rows: raise ValueError('no role appears in 2+ shots with keyframes')
+    output = fresh_output(output)
+    paths = [p for r in rows for p in r['paths']]
+    width = 270 * max(len(r['shots']) for r in rows)
+    graph, n = [], 0
+    for i, r in enumerate(rows):  # every row has 2+ cells, so hstack always has 2+ inputs
+        graph += [f'[{n + j}:v]{CELL}[c{n + j}]' for j in range(len(r['shots']))]
+        cells = ''.join(f'[c{n + j}]' for j in range(len(r['shots'])))
+        graph.append(f'{cells}hstack={len(r["shots"])},pad={width}:480:0:0[r{i}]')
+        n += len(r['shots'])
+    graph.append(''.join(f'[r{i}]' for i in range(len(rows))) + (f'vstack={len(rows)}' if len(rows) > 1 else 'null'))
+    run(['ffmpeg', '-v', 'error', '-n', *[x for p in paths for x in ('-i', state_path.parent / p)],
+         '-filter_complex', ';'.join(graph), '-frames:v', '1', output])
+    return [{'role': r['role'], 'shots': r['shots']} for r in rows]
+
+
 def parse_cut_times(log):
     return [float(t) for t in re.findall(r'pts_time:([0-9.]+)', log)]
 
@@ -167,11 +210,13 @@ def main():
     q = sub.add_parser('compare'); q.add_argument('left'); q.add_argument('right'); q.add_argument('output')
     q = sub.add_parser('pair', help='previs-over-take contact sheet'); q.add_argument('top'); q.add_argument('bottom')
     q.add_argument('output'); q.add_argument('--points', type=int, default=5)
+    q = sub.add_parser('continuity', help='keyframes per role shared by 2+ shots'); q.add_argument('state'); q.add_argument('output')
     q = sub.add_parser('cuts', help='draft reference breakdown from detected cuts'); q.add_argument('input')
     q.add_argument('output_dir'); q.add_argument('--threshold', type=float, default=0.3)
     a = p.parse_args()
     if a.action == 'probe': print(json.dumps(probe(a.input), indent=2))
     elif a.action == 'cuts': print(json.dumps(cuts(a.input, a.output_dir, a.threshold), indent=2))
+    elif a.action == 'continuity': print(json.dumps(continuity(a.state, a.output), indent=2))
     elif a.action == 'pair': pair(a.top, a.bottom, a.output, a.points)
     elif a.action == 'assemble': assemble(a.manifest, a.output)
     elif a.action == 'extract':

@@ -147,5 +147,64 @@ class CutTests(unittest.TestCase):
             self.assertEqual(gate.check_reference(draft), [f'reference {s}: camera and action are required' for s in ('s01', 's02')])
             with self.assertRaises(FileExistsError): m.cuts(src, out)
 
+
+
+@unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+class ContinuityTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.m = module('media')
+        for name, color, size in (('k1', 'red', '90x160'), ('k2', 'green', '90x160'), ('k3', 'blue', '90x160'),
+                                  ('k3b', 'white', '90x160'), ('k4', 'gray', '90x160'), ('wide', 'yellow', '160x90')):
+            subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'color=c={color}:s={size}', '-frames:v', '1',
+                            str(self.root / f'{name}.png')], check=True)
+        key = lambda p, a: {'kind': 'start', 'path': p, 'approval': a}
+        self.state = {'shots': [
+            {'id': 's01', 'object_roles': {'hero': 'hero', 'seat': 'cabin'}, 'keyframes': [key('k1.png', 'approved')]},
+            {'id': 's02', 'object_roles': {'hero': 'hero', 'house_0': 'village'}, 'keyframes': [key('k2.png', 'approved')]},
+            {'id': 's03', 'object_roles': {'hero': 'hero', 'house_0': 'village', 'goo': None}, 'keyframes': [key('k3.png', 'pending')]},
+            {'id': 's04', 'object_roles': {'house_0': 'village'}, 'keyframes': [key('k4.png', 'rejected')]}]}
+        self.path = self.root / 'state.json'
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def rows(self):
+        return [{k: r[k] for k in ('role', 'shots')} for r in self.m.continuity_rows(self.state)]
+
+    def test_rows_group_shared_roles(self):
+        self.assertEqual(self.rows(), [{'role': 'hero', 'shots': ['s01', 's02', 's03']},
+                                       {'role': 'village', 'shots': ['s02', 's03']}])
+
+    def test_pending_used_when_no_approved(self):
+        shot = self.state['shots'][2]
+        self.assertEqual(self.m.current_keyframe(shot)['path'], 'k3.png')
+        shot['keyframes'].append({'kind': 'start', 'path': 'k3b.png', 'approval': 'pending'})
+        self.assertEqual(self.m.current_keyframe(shot)['path'], 'k3b.png')
+        shot['keyframes'].insert(0, {'kind': 'start', 'path': 'k1.png', 'approval': 'approved'})
+        self.assertEqual(self.m.current_keyframe(shot)['path'], 'k1.png')
+        self.assertIsNone(self.m.current_keyframe(self.state['shots'][3]))
+
+    def test_sheet_size(self):
+        self.state['shots'][1]['keyframes'][0]['path'] = 'wide.png'  # a landscape frame still tiles
+        self.path.write_text(json.dumps(self.state))
+        rows = self.m.continuity(self.path, self.root / 'sheet.png')
+        self.assertEqual([r['role'] for r in rows], ['hero', 'village'])
+        stream = self.m.probe(self.root / 'sheet.png')['streams'][0]
+        self.assertEqual((stream['width'], stream['height']), (810, 960))
+
+    def test_refuses_existing_output(self):
+        self.path.write_text(json.dumps(self.state))
+        (self.root / 'sheet.png').write_bytes(b'keep')
+        with self.assertRaises(FileExistsError):
+            self.m.continuity(self.path, self.root / 'sheet.png')
+
+    def test_no_shared_roles_raises(self):
+        self.state['shots'] = self.state['shots'][:1]
+        self.path.write_text(json.dumps(self.state))
+        with self.assertRaisesRegex(ValueError, 'no role appears in 2\\+ shots with keyframes'):
+            self.m.continuity(self.path, self.root / 'sheet.png')
+
 if __name__ == '__main__':
     unittest.main()
