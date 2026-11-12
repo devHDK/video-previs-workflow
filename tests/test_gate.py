@@ -316,8 +316,19 @@ class GateSubmissionTests(unittest.TestCase):
 
     def test_zero_quote_manual_job_passes(self):
         self.budget.update(retry_reserve=0, max_shot_quote=0)
-        self.job['quote'] = 0
+        self.job.update(quote=0, route='manual')
         self.assertEqual(self.errors(), [])
+
+    def test_zero_quote_requires_manual_route(self):
+        self.budget.update(retry_reserve=0, max_shot_quote=0)
+        self.job['quote'] = 0
+        self.assertIn('budget: only manual jobs may be quoted 0', self.errors())
+
+    def test_missing_cap_blocks_zero_quote_job(self):
+        self.budget.update(retry_reserve=0, max_shot_quote=0)
+        del self.budget['cap']
+        self.job.update(quote=0, route='manual')
+        self.assertIn('budget: cap required', self.errors())
 
     def test_job_start_frame_must_match_keyframe(self):
         self.job['start_frame_sha256'] = 'other'

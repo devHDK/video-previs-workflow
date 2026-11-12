@@ -126,6 +126,33 @@ class IngestTests(unittest.TestCase):
             self.h.ingest(self.pack, self.root / 'x.png', 'image')
         self.assertFalse((self.root / 'x.png').exists())
 
+    def truncate(self, name, keep):
+        f = self.pack / 'output' / name
+        f.write_bytes(f.read_bytes()[:int(f.stat().st_size * keep)])
+
+    def test_truncated_jpeg_rejected(self):
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=640x960', '-frames:v', '1',
+                        str(self.pack / 'output/result.jpg')], check=True)
+        self.truncate('result.jpg', .5)
+        with self.assertRaisesRegex(ValueError, 'cannot decode result.jpg'):
+            self.h.ingest(self.pack, self.root / 'kf.jpg', 'image')
+        self.assertFalse((self.root / 'kf.jpg').exists())
+
+    def test_truncated_faststart_mp4_rejected(self):
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=320x240:r=24:d=4', '-pix_fmt', 'yuv420p',
+                        '-movflags', '+faststart', str(self.pack / 'output/take.mp4')], check=True)
+        self.truncate('take.mp4', .6)
+        with self.assertRaisesRegex(ValueError, 'cannot decode take.mp4'):
+            self.h.ingest(self.pack, self.root / 'take.mp4', 'video')
+        self.assertFalse((self.root / 'take.mp4').exists())
+
+    def test_image_renamed_as_video_leaves_no_dest(self):
+        self.media('still.png')
+        (self.pack / 'output/still.png').rename(self.pack / 'output/still.mp4')
+        with self.assertRaisesRegex(ValueError, 'still.mp4'):
+            self.h.ingest(self.pack, self.root / 'take.mp4', 'video')
+        self.assertFalse((self.root / 'take.mp4').exists())
+
     def test_dest_exists_rejected(self):
         self.media('a.png')
         (self.root / 'x.png').write_bytes(b'keep')

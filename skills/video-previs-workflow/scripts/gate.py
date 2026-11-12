@@ -182,6 +182,9 @@ def check_submission(state, job, root):
     errors += budget_errors(state)
     budget, quote = _dict(state.get('budget')), job.get('quote')
     if not _number(quote): return errors + ['budget: job quote required']
+    if not _number(budget.get('cap')): errors.append('budget: cap required')
+    if quote < 0: errors.append('budget: job quote must not be negative')
+    elif quote == 0 and job.get('route') != 'manual': errors.append('budget: only manual jobs may be quoted 0')  # MCP always bills
     num = lambda key: budget[key] if _number(budget.get(key)) else 0  # missing cap or max_attempts -> 0 -> blocked
     if quote > num('max_shot_quote'): errors.append('budget: job quote exceeds max_shot_quote')  # reserve sized from it
     available = num('cap') - num('settled') - num('reserved')

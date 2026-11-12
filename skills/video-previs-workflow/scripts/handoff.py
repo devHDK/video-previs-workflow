@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from media import fresh_output, probe, video_duration
+from media import decode_command, fresh_output, probe, video_duration
 
 EXTENSIONS = {'image': ('.png', '.jpg', '.jpeg', '.webp'), 'video': ('.mp4', '.mov')}
 
@@ -66,14 +66,21 @@ def ingest(pack_dir, dest, kind):
         stream = next(s for s in info['streams'] if s.get('codec_type') == 'video')
         # ffprobe exits 0 on a corrupt image; a decoded frame and real dimensions are the evidence
         if not (int(stream.get('nb_read_frames') or 0) > 0 and stream.get('width') and stream.get('height')): raise ValueError
-    except (subprocess.CalledProcessError, StopIteration, ValueError):
-        raise ValueError(f'cannot decode {src.name}') from None
+        # content, not just the extension, must match the kind
+        if kind == 'image' and stream.get('codec_name') not in ('png', 'mjpeg', 'webp'): raise ValueError
+        if kind == 'video' and not {'mov', 'mp4'} & set(info['format']['format_name'].split(',')): raise ValueError
+        # a truncated JPEG or faststart MP4 still probes; a strict full decode catches it
+        cmd = decode_command(src)
+        subprocess.run(cmd[:cmd.index('-i')] + ['-err_detect', 'explode'] + cmd[cmd.index('-i'):], check=True,
+                       capture_output=True)
+        duration = fps = None
+        if kind == 'video':
+            num, den = (int(x) for x in stream['r_frame_rate'].split('/'))
+            duration, fps = video_duration(src), round(num / den, 3)
+    except (subprocess.CalledProcessError, StopIteration, ValueError, KeyError, ZeroDivisionError):
+        raise ValueError(f'cannot decode {src.name} as {kind}') from None
     dest = fresh_output(dest)
     shutil.copy2(src, dest)
-    duration = fps = None
-    if kind == 'video':
-        num, den = (int(x) for x in stream['r_frame_rate'].split('/'))
-        duration, fps = video_duration(dest), round(num / den, 3)
     return {'dest': str(dest), 'sha256': sha256(dest), 'kind': kind, 'width': stream['width'],
             'height': stream['height'], 'duration': duration, 'fps': fps}
 
