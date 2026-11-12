@@ -24,7 +24,8 @@ Maintain these fields (JSON or equivalent structured text):
 
 - `project_id`, `revision`, `stage`, `updated_at`, `active_host`.
 - `output`: width, height, fps, total_frames, audio/subtitle requirements.
-- `story`: path, sha256, approval status, evidence and time (`approved_at`). Required before previs.
+- `story`: path, sha256, approval status, evidence and time (`approved_at`). Required before previs, unless `reference` is approved.
+- `reference`: the same fields for a reference breakdown (`reference-vNNN.json`) on the reference-led route.
 - `previs`: spec_path/hash, render_path/hash, approval status, approved revision, evidence and time.
 - `assets[]`: role_id, source, original_path/hash, working_path/hash, `sha256` (the working file bound to shots), version, approval status/evidence/time, shot_ids.
 - `shots[]`: id, frames, `required_events` (mandatory, nonempty), `object_roles` (every previs object id → role_id or `null`), `asset_bindings` (role_id, version, sha256), `keyframes[]` (kind `start`/`end`, path, sha256, approval), previs revision, selected output, stale reason, QA status.

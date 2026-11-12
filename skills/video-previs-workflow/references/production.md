@@ -11,11 +11,22 @@ Before previs, the project needs an approved story file (`story-vNNN.json`, the 
 
 Conflict only when the structure needs it. When it does, an antagonist must act, not just appear: name who blocks and how in each obstacle beat, make the hero pay a visible cost, and let tension peak right before the payoff. Shots, events and entity counts in previs derive from these beats; a previs simplification that removes an obstacle beat changes the story and reopens story approval.
 
+## Reference-led route
+
+Use when the user wants a reference video's composition, action and timing reproduced, with new characters, products or setting. An approved reference breakdown takes the story design's place; do not invent a purpose, target action or tension curve for it.
+
+1. Preserve the footage as a local file in `inputs/`. With only a link or description, say what cannot be observed: timing cannot be matched without frames.
+2. From the project directory run `media.py cuts inputs/reference.mp4 reference/v001`. It writes `reference-draft.json`, start/mid/end `stills` and a `clip` per detected shot. Detection is a proposal: inspect the stills and fix missed or false cuts (dissolves, flashes, whip pans) by editing shot boundaries.
+3. Per shot fill `camera` (shot size, angle, height, lens feel, movement, subject placement) and `action`. Time each action change as an `events` entry `{t, event}` in source seconds, read from the shot clip's frames at the source frame rate (`media.py extract reference/v001/s02.mp4 review/s02-frames --every 1/FPS` as a decimal); an event at a cut belongs to the next shot. Add a top-level `changes` list: what is replaced (performer → mascot, product, setting) and what stays.
+4. Save as `reference-v001.json`; run `gate.py reference reference-v001.json` until it prints `OK`. Review with the user as a table (id, start–end, frames at the output fps, camera, action, events) with each shot's stills, then record `reference` in state.
+5. Previs shot ids equal reference shot ids. Each shot's frames = round(end × fps) − round(start × fps) at the output fps, so rounding never accumulates; key each event at frame round(t × fps) − round(start × fps) + 1 of its shot. `gate.py ready` enforces shot frames. A shot that intentionally differs (dropped, merged, retimed, reframed for another aspect ratio) gets a `decision` in a new reference version and needs re-approval.
+6. Review previs with `media.py compare inputs/reference.mp4 PREVIS.mp4 review/ref-vs-previs.mp4` (synced side by side) plus the per-cut reference ↔ previs sheet below.
+
 ## Intake routes
 
 | Input | Action |
 |---|---|
-| Reference footage | Obtain accessible local footage, probe it, extract frames around cuts and action changes. Observe camera, composition, actions and timing; list unavailable evidence. |
+| Reference footage | To reproduce it, follow the reference-led route. As loose inspiration: probe it, extract frames around cuts and action changes, observe camera, composition, actions and timing; list unavailable evidence. |
 | Idea or script | Develop a concrete beginning, change, consequence and ending; write dialogue and shot actions. Label creative proposals. |
 | Approved storyboard/previs | Reuse the approved revision; fill only missing technical or production details. |
 
@@ -43,7 +54,7 @@ Reference comparison: when a storyboard, reference footage or earlier approved v
 
 Build an asset table with role ID, source (existing/generated/mixed), original file, working file, hash, version, approved status and dependent shot IDs. Inspect existing images and preserve the original bytes. Use a copy for crops, background removal and edits. Never manufacture missing views as if provided by the user.
 
-After previs approval, prepare real appearance images for each role named in any shot's `object_roles`, including sets (each distinct location) and props that recur or carry action. Existing approved images can satisfy the requirement; do not regenerate them unnecessarily. Props whose structure matters (supports, ladders, hinges, open/closed states) need a view that shows that structure. Include distinct views or expression/pose references only when needed by the shot or supported model. Background appearance must fit the approved spatial layout. Bind the same approved version to every shot where the role appears, so it cannot change between shots.
+After previs approval, prepare real appearance images for each role named in any shot's `object_roles`, including sets (each distinct location) and props that recur or carry action. Existing approved images can satisfy the requirement; do not regenerate them unnecessarily. Props whose structure matters (supports, ladders, hinges, open/closed states) need a view that shows that structure. For each character or person role, list the facing seen at the start and end of every approved previs shot. A role seen only from the front gets a front view. A role whose back or side is seen anywhere, including a turn within a shot, gets one front + back sheet: both views side by side in a single image, generated in one call when the model can (otherwise combine two images). Bind that sheet file; the gate allows one file per role across shots. Add a side view only when a profile is held large on screen, and expression/pose references only when a shot or the model needs them. Background appearance must fit the approved spatial layout. Bind the same approved version to every shot where the role appears, so it cannot change between shots.
 
 Show the actual image files, not just filenames or prompts. Resolve feedback, then record which versions the user approved. Do not infer appearance approval from previs approval. If an early supplied photo is explicitly approved, reuse that approval and review the remaining assets.
 

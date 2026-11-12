@@ -1,7 +1,9 @@
 """FFmpeg helpers. Commands use argument arrays, preserve inputs, and reject output overwrites."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -115,6 +117,46 @@ def pair(top, bottom, output, points=5):
         run(['ffmpeg', '-v', 'error', '-n', *inputs, '-filter_complex', rows, output])
 
 
+def parse_cut_times(log):
+    return [float(t) for t in re.findall(r'pts_time:([0-9.]+)', log)]
+
+
+def shots_from_cuts(cut_times, duration):
+    bounds = [0] + sorted({t for t in cut_times if 0 < t < duration}) + [duration]
+    return [{'id': f's{i + 1:02d}', 'start': a, 'end': b} for i, (a, b) in enumerate(zip(bounds, bounds[1:]))]
+
+
+def cuts(source, output_dir, threshold=0.3):
+    """Draft reference breakdown: detected cuts, start/mid/end frames and a clip per shot. Paths are kept as given,
+    so run it from the project directory. Detection is a proposal: dissolves, flashes and whip pans need review."""
+    out = Path(output_dir)
+    out.resolve().mkdir(parents=True, exist_ok=False)
+    # ponytail: ffmpeg scene score only; swap in PySceneDetect if soft transitions dominate the references
+    log = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', str(source), '-an', '-vf',
+                          f"setpts=PTS-STARTPTS,select='gt(scene,{threshold})',showinfo", '-f', 'null', '-'],
+                         capture_output=True, text=True, check=True).stderr
+    video = next(s for s in probe(source)['streams'] if s['codec_type'] == 'video')
+    num, den = video['r_frame_rate'].split('/')
+    duration = video_duration(source)
+    shots = shots_from_cuts(parse_cut_times(log), duration)
+    for shot in shots:
+        start, end, sid = shot['start'], shot['end'], shot['id']
+        d = min(0.05, (end - start) / 4)  # stay inside the shot: an exact cut time can return the neighbour frame
+        shot['stills'] = []
+        for name, t in (('start', start + d), ('mid', (start + end) / 2), ('end', end - d)):
+            still = out / f'{sid}-{name}.png'
+            run(['ffmpeg', '-v', 'error', '-n', '-ss', f'{t:.3f}', '-i', source, '-frames:v', '1', still])
+            shot['stills'].append(str(still))
+        shot['clip'] = str(out / f'{sid}.mp4')
+        run(['ffmpeg', '-v', 'error', '-n', '-ss', f'{start:.3f}', '-i', source, '-t', f'{end - start:.3f}', '-an',
+             '-c:v', 'libx264', '-pix_fmt', 'yuv420p', shot['clip']])
+        shot.update(camera='', action='', events=[])
+    draft = {'version': 1, 'source': {'path': str(source), 'sha256': hashlib.sha256(Path(source).read_bytes()).hexdigest(),
+                                      'fps': int(num) / int(den), 'duration': duration}, 'shots': shots}
+    (out / 'reference-draft.json').write_text(json.dumps(draft, indent=2))
+    return draft
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='action', required=True)
@@ -125,8 +167,11 @@ def main():
     q = sub.add_parser('compare'); q.add_argument('left'); q.add_argument('right'); q.add_argument('output')
     q = sub.add_parser('pair', help='previs-over-take contact sheet'); q.add_argument('top'); q.add_argument('bottom')
     q.add_argument('output'); q.add_argument('--points', type=int, default=5)
+    q = sub.add_parser('cuts', help='draft reference breakdown from detected cuts'); q.add_argument('input')
+    q.add_argument('output_dir'); q.add_argument('--threshold', type=float, default=0.3)
     a = p.parse_args()
     if a.action == 'probe': print(json.dumps(probe(a.input), indent=2))
+    elif a.action == 'cuts': print(json.dumps(cuts(a.input, a.output_dir, a.threshold), indent=2))
     elif a.action == 'pair': pair(a.top, a.bottom, a.output, a.points)
     elif a.action == 'assemble': assemble(a.manifest, a.output)
     elif a.action == 'extract':

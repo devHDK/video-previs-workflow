@@ -13,11 +13,15 @@ python3 "$SKILL_DIR/scripts/media.py" extract previs/s01.mp4 review-frames --eve
 python3 "$SKILL_DIR/scripts/media.py" pair previs/s01.mp4 shots/s01/v001/source.mp4 qa/s01-pair.jpg --points 5
 python3 "$SKILL_DIR/scripts/media.py" assemble edit.json output/final.mp4
 python3 "$SKILL_DIR/scripts/media.py" probe output/final.mp4
+python3 "$SKILL_DIR/scripts/media.py" cuts inputs/reference.mp4 reference/v001 --threshold 0.3
+python3 "$SKILL_DIR/scripts/gate.py" reference reference-v001.json
 python3 "$SKILL_DIR/scripts/gate.py" ready state.json
 python3 "$SKILL_DIR/scripts/gate.py" submit state.json shots/s01/v002/job.json
 ```
 
-`gate.py` reads project state and never edits it. `ready` checks the whole project before the first paid video call: approved, unchanged story file; previs approval; `required_events` and an `object_roles` decision for every previs object; an approved asset bound per role, the same version in every shot; exactly one approved, unchanged start keyframe per shot (mark superseded keyframes and assets as such); `retry_reserve ≥ max_shot_quote`. `submit` checks one job (`shot`, numeric `quote`, `start_frame_sha256`, optional `retry_of`) against its shot and the remaining budget, and rejects a quote above `max_shot_quote` because the reserve is sized from it. Both print `OK` (exit 0) or one error per line (exit 1).
+`media.py cuts` detects cuts by ffmpeg scene score (lower `--threshold` finds softer cuts) and writes a draft breakdown, frames and per-shot clips with paths as given; run it from the project directory. `gate.py reference` checks a breakdown before approval: source, contiguous shots from 0 s, `camera`, `action`, events inside their shot (`start ≤ t < end`).
+
+`gate.py` reads project state and never edits it. `ready` checks the whole project before the first paid video call: approved, unchanged story file or reference breakdown (with every reference shot's frames matching previs, unless it carries a `decision`); previs approval; `required_events` and an `object_roles` decision for every previs object; an approved asset bound per role, the same version in every shot; exactly one approved, unchanged start keyframe per shot (mark superseded keyframes and assets as such); `retry_reserve ≥ max_shot_quote`. `submit` checks one job (`shot`, numeric `quote`, `start_frame_sha256`, optional `retry_of`) against its shot and the remaining budget, and rejects a quote above `max_shot_quote` because the reserve is sized from it. Both print `OK` (exit 0) or one error per line (exit 1).
 
 On restricted macOS hosts, EEVEE needs access to Metal GPU and Blender cache/thumbnail directories; a sandbox may deny these. Use the host approval mechanism for this render rather than treating a Metal initialization failure as a scene error.
 

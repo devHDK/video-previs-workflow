@@ -1,6 +1,9 @@
 import copy
 import importlib.util
+import hashlib
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -115,6 +118,34 @@ class EditTests(unittest.TestCase):
         self.assertEqual([round(x, 6) for x in m.sample_times(4.0, 5)], [0.0, 1.0, 2.0, 3.0, 3.95])
         with self.assertRaises(ValueError):
             m.sample_times(4.0, 1)
+
+class CutTests(unittest.TestCase):
+    def test_shots_from_cuts_cover_duration(self):
+        self.assertEqual(module('media').shots_from_cuts([3.5, 1.5, 0, 4.75], 4.75), [
+            {'id': 's01', 'start': 0, 'end': 1.5}, {'id': 's02', 'start': 1.5, 'end': 3.5},
+            {'id': 's03', 'start': 3.5, 'end': 4.75}])
+
+    def test_parse_cut_times(self):
+        log = ('[Parsed_showinfo_2 @ 0x1] n:   0 pts:  45 pts_time:1.5     duration:1\n'
+               '[Parsed_showinfo_2 @ 0x1] n:   1 pts: 105 pts_time:3.5 duration:1\n')
+        self.assertEqual(module('media').parse_cut_times(log), [1.5, 3.5])
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+    def test_cuts_writes_draft_frames_and_clips(self):
+        m, gate = module('media'), module('gate')
+        with tempfile.TemporaryDirectory() as t:
+            src, out = Path(t) / 'ref.mp4', Path(t) / 'reference/v001'
+            subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=64x64:r=30:d=1',
+                            '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=30:d=1', '-filter_complex',
+                            '[0][1]concat=n=2:v=1[v]', '-map', '[v]', '-pix_fmt', 'yuv420p', str(src)], check=True)
+            draft = m.cuts(src, out)
+            self.assertEqual([(round(s['start'], 2), round(s['end'], 2)) for s in draft['shots']], [(0, 1.0), (1.0, 2.0)])
+            self.assertEqual(draft['source']['sha256'], hashlib.sha256(src.read_bytes()).hexdigest())
+            for shot in draft['shots']:
+                for path in shot['stills'] + [shot['clip']]: self.assertTrue(Path(path).is_file(), path)
+            self.assertEqual(json.loads((out / 'reference-draft.json').read_text()), draft)
+            self.assertEqual(gate.check_reference(draft), [f'reference {s}: camera and action are required' for s in ('s01', 's02')])
+            with self.assertRaises(FileExistsError): m.cuts(src, out)
 
 if __name__ == '__main__':
     unittest.main()

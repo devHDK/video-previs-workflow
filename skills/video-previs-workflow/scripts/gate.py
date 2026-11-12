@@ -21,9 +21,69 @@ def _unchanged(root, record):
     return isinstance(path, str) and (root / path).is_file() and sha256(root / path) == record.get('sha256')
 
 
+def _approved(state, key): return _dict(state.get(key)).get('approval') == 'approved'
+
+
+def frame_at(t, fps): return int(t * fps + 0.5)  # round each cut once, so shot lengths never drift
+
+
+def check_reference(ref, spec=None):
+    """Reference breakdown shape; given the previs spec, also each shot's frames against the reference cuts."""
+    if not isinstance(ref, dict): return ['reference must be an object']
+    source, errors = _dict(ref.get('source')), []
+    if not (_text(source.get('path')) and _text(source.get('sha256'))):
+        errors.append('reference: source.path and source.sha256 are required')
+    shots = ref.get('shots')
+    if not isinstance(shots, list) or not shots: return errors + ['reference: shots must be a nonempty list']
+    fps = _dict(spec).get('fps')
+    if spec is not None and not (_number(fps) and fps > 0):
+        errors.append('previs: spec fps required for reference timing'); spec = None
+    frames = {s.get('id'): s.get('frames') for s in _list(_dict(spec).get('shots')) if isinstance(s, dict)}
+    ids, previous_end = set(), 0
+    for shot in shots:
+        sid = shot.get('id') if isinstance(shot, dict) else None
+        if not _text(sid) or sid in ids: errors.append('reference: shot id must be unique and nonempty'); continue
+        ids.add(sid)
+        start, end = shot.get('start'), shot.get('end')
+        if not (_number(start) and _number(end) and start < end):
+            errors.append(f'reference {sid}: start and end must be numbers with start < end'); continue
+        if abs(start - previous_end) > 1e-3: errors.append(f'reference {sid}: gap or overlap with previous shot')
+        previous_end = end
+        if not (_text(shot.get('camera')) and _text(shot.get('action'))):
+            errors.append(f'reference {sid}: camera and action are required')
+        for event in map(_dict, _list(shot.get('events'))):
+            t = event.get('t')
+            if not (_number(t) and _text(event.get('event'))): errors.append(f'reference {sid}: events need t and event')
+            elif not start <= t < end: errors.append(f'reference {sid}: event at {t} s is outside the shot')  # a cut opens the next shot
+        if spec is None or _text(shot.get('decision')): continue  # a recorded decision approves the deviation
+        expected = frame_at(end, fps) - frame_at(start, fps)
+        if sid not in frames: errors.append(f'reference {sid}: shot not in previs spec')
+        elif frames[sid] != expected: errors.append(f'{sid}: previs frames {frames[sid]} differ from reference timing {expected}')
+    return errors
+
+
+def reference_errors(state, root):
+    record = _dict(state.get('reference'))
+    if not _unchanged(root, record): return ['reference: file missing or changed since approval']
+    try: ref = json.loads((root / record['path']).read_text())
+    except ValueError: ref = None
+    spec, path = None, _dict(state.get('previs')).get('spec_path')
+    if isinstance(path, str) and (root / path).is_file():  # a missing spec is reported by spec_objects
+        try: spec = _dict(json.loads((root / path).read_text()))
+        except ValueError: pass
+    return check_reference(ref, spec)
+
+
 def story_errors(state, root):
+    """Direction: an approved story design, or for a reference-led video an approved reference breakdown."""
+    if not (_approved(state, 'story') or _approved(state, 'reference')):
+        return ['story: approved story design or reference breakdown required']
+    errors = reference_errors(state, root) if _approved(state, 'reference') else []
+    return errors + (_story_file_errors(state, root) if _approved(state, 'story') else [])
+
+
+def _story_file_errors(state, root):
     story = _dict(state.get('story'))
-    if story.get('approval') != 'approved': return ['story: approved story design required']
     if not _unchanged(root, story): return ['story: file missing or changed since approval']
     try: data = _dict(json.loads((root / story['path']).read_text()))
     except ValueError: data = {}
@@ -143,7 +203,9 @@ def main():
     sub = p.add_subparsers(dest='action', required=True)
     q = sub.add_parser('ready', help='whole project ready for paid video generation'); q.add_argument('state')
     q = sub.add_parser('submit', help='one paid video job'); q.add_argument('state'); q.add_argument('job')
+    q = sub.add_parser('reference', help='reference breakdown file, before approval'); q.add_argument('file')
     a = p.parse_args()
+    if a.action == 'reference': _report(check_reference(json.loads(Path(a.file).read_text())))
     state_path = Path(a.state).resolve()
     state = json.loads(state_path.read_text())
     if a.action == 'ready': _report(check_project(state, state_path.parent))

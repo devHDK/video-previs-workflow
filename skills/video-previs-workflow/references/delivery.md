@@ -20,6 +20,8 @@ For each shot build `media.py pair PREVIS TAKE sheet.jpg` (previs row over take 
 - Timing drift, frozen/padded frames and unintended cuts.
 - Voice intelligibility, effects, sync and subtitle text/placement.
 
+On the reference-led route, also run `media.py compare` on the reference and the final edit, and report each reference event's frame offset in the final.
+
 Record uninspected intervals. A frame extraction command creates evidence to inspect; it does not inspect the images. Side-by-side comparison ends at the shorter input and is a visual aid, not a fidelity score. Spec changed-shot lists report numerical/structural edits only. Do not promise generative frame identity; exact frame choreography may require a separately scoped native animation/compositing route.
 
 Probe and decode final MP4. Check width/height, FPS, frame count, cut order, total duration, audio presence and intended subtitles. Listen to audio if supported; otherwise state that listening was not performed. Confirm file exists and is nonempty; deliver a local link to it, the review package and a concise QA/cost summary. Mark partial delivery if required content or runtime verification remains missing.

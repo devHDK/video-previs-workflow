@@ -71,3 +71,14 @@ Trigger: review of the first generated scalp-immigration-ep01 edit (previs v004 
 - Observation: shots with many set-dressing proxies (ten hair strands, five houses) need one `object_roles` entry each; mapping them to a set role or `null` is verbose but explicit.
 
 Not verified: paid keyframe or video generation through the new gates, live invocation of `story-design` from Claude Code or Codex, and whether keyframe start frames actually hold composition in the provider's models.
+
+## 2026-11-12 reference-led route
+
+Trigger: a request to reproduce another video's composition, action and timing with new characters. The story gate made that impossible without an invented purpose and target action.
+
+- `media.py cuts` (ffmpeg scene score → draft breakdown, start/mid/end stills and a clip per shot), `gate.py reference`, and an approved `reference` in state accepted in place of `story`; `ready`/`submit` then require previs shot frames = round(end × fps) − round(start × fps). Each new test was run red before its implementation; the suite has 88 passing tests.
+- Baseline (skill without the route, synthetic 30 fps reference with cuts at 1.5 s and 3.5 s, target 24 fps): the agent invented a placeholder story (`structure: custom`, payoff set equal to the CTA beat) to get past checkpoint 0. It hand-built cut detection with raw ffmpeg, decided the fps rounding itself and planned to use only the previs as motion control.
+- With the route, the same scenario: the agent used `media.py cuts`, wrote `reference-v001.json` that passed `gate.py reference`, derived 36/48/30 frames by the documented rule, and proposed the reference clip as motion input with upload consent. Its remaining findings were fixed: an event at a cut now belongs to the next shot (`start ≤ t < end`), and draft image paths are named `stills`, not `frames`.
+- `media.py cuts` was run through the installed skill path on the same file: the stills next to each cut sample their own shot (red, test pattern, green).
+
+Not verified: real-world footage with dissolves or fast motion (the threshold is a proposal and needs review), event timing beyond manual frame reading, and provider motion control fed with a reference clip.
