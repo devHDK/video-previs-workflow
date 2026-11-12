@@ -63,7 +63,7 @@ def check(story):
     if action.get('beat') not in ids: errors.append('target_action.beat must name a beat')
     elif ids.index(action['beat']) < p: errors.append('target_action.beat must not come before payoff_beat')
 
-    needed = STRUCTURES.get(structure.get('id'), 0)
+    needed = STRUCTURES.get(structure['id'], 0) if text(structure.get('id')) else 0
     before = [b for b in beats if isinstance(b, dict) and b.get('id') in ids[:p]]
     found = sum(1 for b in before if text(b.get('obstacle')))
     if found < needed:

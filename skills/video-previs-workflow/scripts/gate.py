@@ -49,7 +49,8 @@ def spec_objects(state, root):
 def _shas(records, approved_only=False):
     found = {}
     for r in _list(records):
-        if isinstance(r, dict) and _text(r.get('sha256')) and (not approved_only or r.get('approval') == 'approved'):
+        if isinstance(r, dict) and isinstance(r.get('role_id'), str) and _text(r.get('sha256')) \
+                and (not approved_only or r.get('approval') == 'approved'):
             found.setdefault(r.get('role_id'), set()).add(r['sha256'])
     return found
 
@@ -66,11 +67,16 @@ def shot_errors(state, shot, objects, root):
     if not _list(shot.get('required_events')): errors.append(f'{sid}: required_events missing')
     roles = _dict(shot.get('object_roles'))
     errors += [f'{sid}: object {oid} has no role decision (map to a role or null)' for oid in objects if oid not in roles]
+    errors += [f'{sid}: object {oid} role must be a string or null' for oid, r in roles.items()
+               if r is not None and not isinstance(r, str)]
     approved, bound = _shas(state.get('assets'), approved_only=True), _shas(shot.get('asset_bindings'))
-    for role in dict.fromkeys(r for r in roles.values() if r is not None):
+    for role in dict.fromkeys(r for r in roles.values() if isinstance(r, str)):
         if not approved.get(role, set()) & bound.get(role, set()):
             errors.append(f'{sid}: role {role} needs an approved asset bound to this shot')
-    if approved_start_sha(shot) is None: errors.append(f'{sid}: approved start keyframe required')
+    starts = [k for k in _list(shot.get('keyframes'))
+              if isinstance(k, dict) and k.get('kind') == 'start' and k.get('approval') == 'approved']
+    if not starts: errors.append(f'{sid}: approved start keyframe required')
+    elif len(starts) > 1: errors.append(f'{sid}: more than one approved start keyframe')
     for k in _list(shot.get('keyframes')):
         if isinstance(k, dict) and k.get('approval') == 'approved' and not _unchanged(root, k):
             errors.append(f"{sid}: keyframe {k.get('path')} missing or changed since approval")
@@ -90,9 +96,13 @@ def check_project(state, root):
     if _dict(state.get('previs')).get('approval') != 'approved': errors.append('previs: approval required')
     spec_errors, objects = spec_objects(state, root)
     errors += spec_errors
+    versions = {}
     for shot in _list(state.get('shots')):
-        if isinstance(shot, dict):
-            errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot.get('id')), root)
+        if not isinstance(shot, dict): continue
+        if not isinstance(shot.get('id'), str): errors.append('shot id must be a string'); continue
+        errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root)
+        for role, shas in _shas(shot.get('asset_bindings')).items(): versions.setdefault(role, set()).update(shas)
+    errors += [f'role {role} is bound to different versions across shots' for role, shas in versions.items() if len(shas) > 1]
     return errors + budget_errors(state)
 
 
@@ -113,6 +123,7 @@ def check_submission(state, job, root):
     budget, quote = _dict(state.get('budget')), job.get('quote')
     if not _number(quote): return errors + ['budget: job quote required']
     num = lambda key: budget[key] if _number(budget.get(key)) else 0  # missing cap or max_attempts -> 0 -> blocked
+    if quote > num('max_shot_quote'): errors.append('budget: job quote exceeds max_shot_quote')  # reserve sized from it
     available = num('cap') - num('settled') - num('reserved')
     if job.get('retry_of'):
         if quote > available: errors.append('budget: quote exceeds available credits')

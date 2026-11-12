@@ -112,6 +112,36 @@ class GateProjectTests(unittest.TestCase):
         self.state['budget']['retry_reserve'] = 10
         self.assertIn('budget: retry_reserve must cover max_shot_quote', self.errors())
 
+    def test_list_role_reported_not_raised(self):
+        self.shot['object_roles']['slide'] = ['slide']
+        self.assertIn('s01: object slide role must be a string or null', self.errors())
+
+    def test_nonstring_asset_role_ignored_not_raised(self):
+        self.state['assets'][1]['role_id'] = ['slide']
+        self.assertIn('s01: role slide needs an approved asset bound to this shot', self.errors())
+
+    def test_nonstring_shot_id_reported_not_raised(self):
+        self.shot['id'] = ['s01']
+        self.assertIn('shot id must be a string', self.errors())
+
+    def test_two_approved_start_keyframes_reported(self):
+        (self.root / 'k2.png').write_bytes(b'k2')
+        self.shot['keyframes'].append({'kind': 'start', 'path': 'k2.png', 'sha256': sha(self.root / 'k2.png'),
+                                       'approval': 'approved'})
+        self.assertIn('s01: more than one approved start keyframe', self.errors())
+
+    def test_role_bound_to_different_versions_across_shots(self):
+        scene = json.loads((self.root / 'scene.json').read_text())
+        scene['shots'].append({'id': 's02', 'objects': [{'id': 'slide'}]})
+        (self.root / 'scene.json').write_text(json.dumps(scene))
+        (self.root / 'slide2.png').write_bytes(b'slide2')
+        self.state['assets'].append({'role_id': 'slide', 'version': 'v002', 'sha256': sha(self.root / 'slide2.png'),
+                                     'approval': 'approved'})
+        self.state['shots'].append({'id': 's02', 'required_events': ['slide seen'], 'object_roles': {'slide': 'slide'},
+                                    'asset_bindings': [{'role_id': 'slide', 'sha256': sha(self.root / 'slide2.png')}],
+                                    'keyframes': [dict(self.shot['keyframes'][0])]})
+        self.assertIn('role slide is bound to different versions across shots', self.errors())
+
 
 class GateSubmissionTests(unittest.TestCase):
     def setUp(self):
@@ -148,6 +178,10 @@ class GateSubmissionTests(unittest.TestCase):
     def test_unresolved_reservation_counts(self):
         self.budget['reserved'] = 50
         self.assertIn('budget: submission would consume the retry reserve', self.errors())
+
+    def test_quote_above_max_shot_quote_rejected(self):
+        self.job['quote'] = 60
+        self.assertIn('budget: job quote exceeds max_shot_quote', self.errors())
 
     def test_job_start_frame_must_match_keyframe(self):
         self.job['start_frame_sha256'] = 'other'

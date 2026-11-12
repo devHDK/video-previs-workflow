@@ -83,6 +83,10 @@ class StoryTests(unittest.TestCase):
         self.s['beats'][0]['serves'] = 'fun'
         self.assertIn(f"{self.s['beats'][0]['id']}: serves must be purpose or target_action", self.errors())
 
+    def test_nonstring_structure_id_reported_not_raised(self):
+        self.s['structure']['id'] = ['obstacle_payoff']
+        self.assertIn('structure.id is required', self.errors())
+
     def test_tension_range(self):
         self.s['beats'][0]['tension'] = 6
         self.assertIn(f"{self.s['beats'][0]['id']}: tension must be an integer 0-5", self.errors())

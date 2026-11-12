@@ -17,7 +17,7 @@ python3 "$SKILL_DIR/scripts/gate.py" ready state.json
 python3 "$SKILL_DIR/scripts/gate.py" submit state.json shots/s01/v002/job.json
 ```
 
-`gate.py` reads project state and never edits it. `ready` checks the whole project before the first paid video call: approved, unchanged story file; previs approval; `required_events` and an `object_roles` decision for every previs object; an approved asset bound per role; an approved, unchanged start keyframe per shot; `retry_reserve ≥ max_shot_quote`. `submit` checks one job (`shot`, `quote`, `start_frame_sha256`, optional `retry_of`) against its shot and the remaining budget. Both print `OK` (exit 0) or one error per line (exit 1).
+`gate.py` reads project state and never edits it. `ready` checks the whole project before the first paid video call: approved, unchanged story file; previs approval; `required_events` and an `object_roles` decision for every previs object; an approved asset bound per role, the same version in every shot; exactly one approved, unchanged start keyframe per shot (mark superseded keyframes and assets as such); `retry_reserve ≥ max_shot_quote`. `submit` checks one job (`shot`, numeric `quote`, `start_frame_sha256`, optional `retry_of`) against its shot and the remaining budget, and rejects a quote above `max_shot_quote` because the reserve is sized from it. Both print `OK` (exit 0) or one error per line (exit 1).
 
 On restricted macOS hosts, EEVEE needs access to Metal GPU and Blender cache/thumbnail directories; a sandbox may deny these. Use the host approval mechanism for this render rather than treating a Metal initialization failure as a scene error.
 
