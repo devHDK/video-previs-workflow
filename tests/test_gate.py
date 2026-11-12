@@ -350,3 +350,60 @@ class GateSubmissionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GateContinuityTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.g = load('gate')
+        self.state = ready_project(self.root)
+        (self.root / 'scene.json').write_text(json.dumps({'shots': [
+            {'id': s, 'objects': [{'id': 'hero'}, {'id': 'slide'}, {'id': 'ground'}]} for s in ('s01', 's02')]}))
+        (self.root / 'k2.png').write_bytes(b'k2')
+        s02 = json.loads(json.dumps(self.state['shots'][0])); s02['id'] = 's02'
+        s02['keyframes'] = [{'kind': 'start', 'path': 'k2.png', 'sha256': sha(self.root / 'k2.png'), 'approval': 'approved'}]
+        self.state['shots'].append(s02)
+        self.review = lambda role: {'role_id': role, 'approval': 'approved',
+                                    'keyframe_sha256': {'s01': sha(self.root / 'k.png'), 's02': sha(self.root / 'k2.png')}}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def errors(self):
+        return self.g.check_project(self.state, self.root)
+
+    def test_shared_role_needs_review(self):
+        e = self.errors()
+        for role in ('hero', 'slide'):
+            self.assertIn(f'continuity: role {role} needs an approved cross-shot keyframe review', e)
+
+    def test_matching_review_passes(self):
+        self.state['continuity'] = [self.review('hero'), self.review('slide')]
+        self.assertEqual(self.errors(), [])
+
+    def test_review_stale_after_keyframe_change(self):
+        self.state['continuity'] = [self.review('hero'), self.review('slide')]
+        (self.root / 'k3.png').write_bytes(b'k3')
+        self.state['shots'][1]['keyframes'] = [{'kind': 'start', 'path': 'k3.png', 'sha256': sha(self.root / 'k3.png'), 'approval': 'approved'}]
+        self.assertIn('continuity: role hero review is stale (keyframes changed)', self.errors())
+
+    def test_review_missing_shot_is_stale(self):
+        hero = self.review('hero'); del hero['keyframe_sha256']['s02']
+        self.state['continuity'] = [hero, self.review('slide')]
+        self.assertIn('continuity: role hero review is stale (keyframes changed)', self.errors())
+
+    def test_unapproved_review_rejected(self):
+        hero = self.review('hero'); hero['approval'] = 'pending'
+        self.state['continuity'] = [hero, self.review('slide')]
+        self.assertIn('continuity: role hero needs an approved cross-shot keyframe review', self.errors())
+
+    def test_single_shot_role_not_checked(self):
+        self.state['shots'][1]['object_roles'] = {'hero': 'hero', 'slide': None, 'ground': None}
+        self.state['continuity'] = [self.review('hero')]
+        self.assertEqual([e for e in self.errors() if e.startswith('continuity')], [])
+
+    def test_submit_checks_roles_of_its_shot(self):
+        job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        e = self.g.check_submission(self.state, job, self.root)
+        self.assertIn('continuity: role hero needs an approved cross-shot keyframe review', e)

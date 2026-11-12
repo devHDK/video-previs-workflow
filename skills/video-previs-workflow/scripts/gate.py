@@ -143,6 +143,25 @@ def shot_errors(state, shot, objects, root):
     return errors
 
 
+def continuity_errors(state, roles=None):
+    """Every role used by 2+ shots needs an approved review whose keyframe hashes match the current approved keyframes."""
+    uses = {}
+    for shot in _list(state.get('shots')):
+        if isinstance(shot, dict) and isinstance(shot.get('id'), str):
+            for role in set(r for r in _dict(shot.get('object_roles')).values() if isinstance(r, str)):
+                uses.setdefault(role, {})[shot['id']] = approved_start_sha(shot)
+    reviews = {r.get('role_id'): r for r in _list(state.get('continuity')) if isinstance(r, dict)}
+    errors = []
+    for role, shas in uses.items():
+        if len(shas) < 2 or (roles is not None and role not in roles): continue
+        review = reviews.get(role)
+        if not review or review.get('approval') != 'approved':
+            errors.append(f'continuity: role {role} needs an approved cross-shot keyframe review')
+        elif _dict(review.get('keyframe_sha256')) != shas:
+            errors.append(f'continuity: role {role} review is stale (keyframes changed)')
+    return errors
+
+
 def budget_errors(state):
     budget = _dict(state.get('budget'))
     reserve, quote = budget.get('retry_reserve'), budget.get('max_shot_quote')
@@ -163,7 +182,7 @@ def check_project(state, root):
         errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root)
         for role, shas in _shas(shot.get('asset_bindings')).items(): versions.setdefault(role, set()).update(shas)
     errors += [f'role {role} is bound to different versions across shots' for role, shas in versions.items() if len(shas) > 1]
-    return errors + budget_errors(state)
+    return errors + continuity_errors(state) + budget_errors(state)
 
 
 def check_submission(state, job, root):
@@ -176,6 +195,7 @@ def check_submission(state, job, root):
     if _dict(state.get('previs')).get('approval') != 'approved': errors.append('previs: approval required')
     spec_errors, objects = spec_objects(state, root)
     errors += spec_errors + shot_errors(state, shot, [] if spec_errors else objects.get(sid), root)
+    errors += continuity_errors(state, {r for r in _dict(shot.get('object_roles')).values() if isinstance(r, str)})
     start = approved_start_sha(shot)
     if start is not None and job.get('start_frame_sha256') != start:
         errors.append(f'{sid}: job start frame is not the approved keyframe')
