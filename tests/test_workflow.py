@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import json
 import sys
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -79,6 +80,41 @@ class EditTests(unittest.TestCase):
         m = module('media')
         with self.assertRaises(FileExistsError):
             m.fresh_output(Path(__file__))
+
+    def test_clip_command_applies_in_point_and_speed(self):
+        m = module('media')
+        cmd = m.clip_command(Path('/tmp/a.mp4'), Path('/tmp/o.mp4'), 48, 24, 360, 640, start=1.5, speed=1.05)
+        self.assertLess(cmd.index('-ss'), cmd.index('-i'))
+        self.assertEqual(cmd[cmd.index('-ss') + 1], '1.5')
+        self.assertIn('setpts=(PTS-STARTPTS)/1.05', cmd[cmd.index('-vf') + 1])
+
+    def test_default_clip_command_has_no_seek(self):
+        self.assertNotIn('-ss', module('media').clip_command(Path('/tmp/a.mp4'), Path('/tmp/o.mp4'), 48, 24, 360, 640))
+
+    def _manifest(self, tmp, **clip):
+        (Path(tmp) / 'a.mp4').write_bytes(b'')
+        p = Path(tmp) / 'edit.json'
+        p.write_text(json.dumps({'fps': 24, 'width': 360, 'height': 640,
+                                 'clips': [{'path': 'a.mp4', 'frames': 48, **clip}]}))
+        return p
+
+    def test_assemble_rejects_speed_outside_range(self):
+        with tempfile.TemporaryDirectory() as t, self.assertRaisesRegex(ValueError, 'speed must be within 0.9-1.1'):
+            module('media').assemble(self._manifest(t, speed=1.35), Path(t) / 'out.mp4')
+
+    def test_assemble_rejects_dialogue_speed_change(self):
+        with tempfile.TemporaryDirectory() as t, self.assertRaisesRegex(ValueError, 'dialogue clips must keep speed 1.0'):
+            module('media').assemble(self._manifest(t, speed=1.05, dialogue=True), Path(t) / 'out.mp4')
+
+    def test_assemble_rejects_negative_start(self):
+        with tempfile.TemporaryDirectory() as t, self.assertRaisesRegex(ValueError, 'start must be >= 0'):
+            module('media').assemble(self._manifest(t, start=-1), Path(t) / 'out.mp4')
+
+    def test_sample_times_clamps_last_frame(self):
+        m = module('media')
+        self.assertEqual([round(x, 6) for x in m.sample_times(4.0, 5)], [0.0, 1.0, 2.0, 3.0, 3.95])
+        with self.assertRaises(ValueError):
+            m.sample_times(4.0, 1)
 
 if __name__ == '__main__':
     unittest.main()

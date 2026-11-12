@@ -22,9 +22,14 @@ def probe(path):
         '-show_streams', '-show_format', '-of', 'json', str(path)], text=True))
 
 
-def clip_command(source, output, frames, fps, width, height):
-    return ['ffmpeg', '-v', 'error', '-n', '-i', str(source), '-an', '-vf',
-        f'fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,'
+SPEED_RANGE = (0.9, 1.1)  # beyond this, generated motion visibly rushes or drags: re-cut or regenerate
+
+
+def clip_command(source, output, frames, fps, width, height, start=0.0, speed=1.0):
+    seek = ['-ss', str(start)] if start > 0 else []
+    retime = f'setpts=(PTS-STARTPTS)/{speed},' if speed != 1 else ''
+    return ['ffmpeg', '-v', 'error', '-n', *seek, '-i', str(source), '-an', '-vf',
+        f'{retime}fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,'
         f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,tpad=stop_mode=clone:stop_duration={frames/fps}',
         '-frames:v', str(frames), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(output)]
 
@@ -44,6 +49,11 @@ def assemble(manifest_path, output):
     for clip in data['clips']:
         if type(clip.get('frames')) is not int or clip['frames'] <= 0: raise ValueError('positive frames required')
         if not resolve(clip['path']).is_file(): raise FileNotFoundError(clip['path'])
+        start, speed = clip.get('start', 0), clip.get('speed', 1)
+        if type(start) not in (int, float) or start < 0: raise ValueError('start must be >= 0')
+        if type(speed) not in (int, float) or not SPEED_RANGE[0] <= speed <= SPEED_RANGE[1]:
+            raise ValueError('speed must be within 0.9-1.1')
+        if clip.get('dialogue') and speed != 1: raise ValueError('dialogue clips must keep speed 1.0')
     # Audio must already be mixed to the approved timeline. Clip audio is intentionally discarded.
     for key in ('audio', 'subtitles'):
         if data.get(key) and not resolve(data[key]).is_file(): raise FileNotFoundError(data[key])
@@ -52,7 +62,8 @@ def assemble(manifest_path, output):
     with tempfile.TemporaryDirectory(prefix='video-edit-') as temp:
         root = Path(temp)
         for i, clip in enumerate(data['clips']):
-            run(clip_command(resolve(clip['path']), root / f'{i}.mp4', clip['frames'], data['fps'], data['width'], data['height']))
+            run(clip_command(resolve(clip['path']), root / f'{i}.mp4', clip['frames'], data['fps'], data['width'],
+                             data['height'], clip.get('start', 0), clip.get('speed', 1)))
         (root / 'clips.txt').write_text(''.join(f"file '{i}.mp4'\n" for i in range(len(data['clips']))))
         run(['ffmpeg', '-v', 'error', '-n', '-f', 'concat', '-safe', '1', '-i', root / 'clips.txt', '-c', 'copy', root / 'joined.mp4'])
         cmd = ['ffmpeg', '-v', 'error', '-n', '-i', root / 'joined.mp4']
@@ -73,6 +84,37 @@ def assemble(manifest_path, output):
     print(json.dumps(info, indent=2))
 
 
+def sample_times(duration, points):
+    if points < 2: raise ValueError('points must be >= 2')
+    times = [duration * i / (points - 1) for i in range(points)]
+    times[-1] = max(0, duration - 0.05)  # seeking to the exact end returns no frame
+    return times
+
+
+def video_duration(path):
+    info = probe(path)
+    video = next(s for s in info['streams'] if s['codec_type'] == 'video')
+    # Generated clips can carry longer audio, so prefer the video stream's own duration.
+    return float(video.get('duration') or info['format']['duration'])
+
+
+def pair(top, bottom, output, points=5):
+    """Two-row contact sheet: top row from `top`, bottom row from `bottom`, at the same relative times."""
+    output = fresh_output(output)
+    with tempfile.TemporaryDirectory(prefix='video-pair-') as temp:
+        frames = []
+        for row, source in enumerate((top, bottom)):
+            for i, t in enumerate(sample_times(video_duration(source), points)):
+                frame = Path(temp) / f'{row}-{i}.png'
+                run(['ffmpeg', '-v', 'error', '-n', '-ss', f'{t:.3f}', '-i', source, '-frames:v', '1',
+                     '-vf', 'scale=270:480:force_original_aspect_ratio=decrease,pad=270:480:(ow-iw)/2:(oh-ih)/2', frame])
+                frames.append(frame)
+        inputs = [x for f in frames for x in ('-i', f)]
+        rows = ''.join(f'[{i}]' for i in range(points)) + f'hstack={points}[t];' + \
+            ''.join(f'[{points + i}]' for i in range(points)) + f'hstack={points}[b];[t][b]vstack'
+        run(['ffmpeg', '-v', 'error', '-n', *inputs, '-filter_complex', rows, output])
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='action', required=True)
@@ -81,8 +123,11 @@ def main():
     q = sub.add_parser('encode'); q.add_argument('sequence', help='PNG pattern, e.g. frame_%04d.png'); q.add_argument('output'); q.add_argument('--fps', type=int, required=True)
     q = sub.add_parser('assemble'); q.add_argument('manifest'); q.add_argument('output')
     q = sub.add_parser('compare'); q.add_argument('left'); q.add_argument('right'); q.add_argument('output')
+    q = sub.add_parser('pair', help='previs-over-take contact sheet'); q.add_argument('top'); q.add_argument('bottom')
+    q.add_argument('output'); q.add_argument('--points', type=int, default=5)
     a = p.parse_args()
     if a.action == 'probe': print(json.dumps(probe(a.input), indent=2))
+    elif a.action == 'pair': pair(a.top, a.bottom, a.output, a.points)
     elif a.action == 'assemble': assemble(a.manifest, a.output)
     elif a.action == 'extract':
         if a.every <= 0: raise ValueError('--every must be positive')
