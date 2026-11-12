@@ -146,7 +146,7 @@ def shot_errors(state, shot, objects, root):
 def budget_errors(state):
     budget = _dict(state.get('budget'))
     reserve, quote = budget.get('retry_reserve'), budget.get('max_shot_quote')
-    if _number(reserve) and _number(quote) and quote > 0 and reserve >= quote: return []
+    if _number(reserve) and _number(quote) and quote >= 0 and reserve >= quote: return []  # 0/0 = all video via web Unlimited
     return ['budget: retry_reserve must cover max_shot_quote']
 
 

@@ -112,6 +112,14 @@ class GateProjectTests(unittest.TestCase):
         self.state['budget']['retry_reserve'] = 10
         self.assertIn('budget: retry_reserve must cover max_shot_quote', self.errors())
 
+    def test_all_web_unlimited_budget_passes(self):
+        self.state['budget'].update(retry_reserve=0, max_shot_quote=0)
+        self.assertEqual(self.errors(), [])
+
+    def test_negative_quote_rejected(self):
+        self.state['budget'].update(retry_reserve=0, max_shot_quote=-1)
+        self.assertIn('budget: retry_reserve must cover max_shot_quote', self.errors())
+
     def test_list_role_reported_not_raised(self):
         self.shot['object_roles']['slide'] = ['slide']
         self.assertIn('s01: object slide role must be a string or null', self.errors())
@@ -301,6 +309,15 @@ class GateSubmissionTests(unittest.TestCase):
     def test_quote_above_max_shot_quote_rejected(self):
         self.job['quote'] = 60
         self.assertIn('budget: job quote exceeds max_shot_quote', self.errors())
+
+    def test_zero_budget_blocks_paid_job(self):
+        self.budget.update(retry_reserve=0, max_shot_quote=0)
+        self.assertIn('budget: job quote exceeds max_shot_quote', self.errors())
+
+    def test_zero_quote_manual_job_passes(self):
+        self.budget.update(retry_reserve=0, max_shot_quote=0)
+        self.job['quote'] = 0
+        self.assertEqual(self.errors(), [])
 
     def test_job_start_frame_must_match_keyframe(self):
         self.job['start_frame_sha256'] = 'other'
