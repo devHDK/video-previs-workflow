@@ -441,6 +441,10 @@ class GateSequenceJobTests(unittest.TestCase):
         self.job['shots'] = ['s01', 's09']
         self.assertIn('s09: shot not found in state', self.sub())
 
+    def test_malformed_shot_id_reported_not_raised(self):
+        self.state['shots'].append({'id': ['s03']})
+        self.assertEqual(self.sub(), [])
+
     def test_sequence_must_begin_with_shot(self):
         self.job['shots'] = ['s02', 's01']
         self.assertIn('job: shots must begin with shot', self.sub())

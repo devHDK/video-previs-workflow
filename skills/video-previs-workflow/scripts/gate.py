@@ -193,7 +193,7 @@ def check_submission(state, job, root):
     """One paid job: its shot must be ready and the job must not eat the retry reserve unless it is a retry."""
     if not isinstance(state, dict) or not isinstance(job, dict): return ['state and job must be objects']
     sid = job.get('shot')
-    by_id = {s.get('id'): s for s in _list(state.get('shots')) if isinstance(s, dict)}
+    by_id = {s['id']: s for s in _list(state.get('shots')) if isinstance(s, dict) and isinstance(s.get('id'), str)}
     shot = by_id.get(sid) if isinstance(sid, str) else None
     if shot is None: return [f'{sid}: shot not found in state']
     covered = job.get('shots', [sid])  # a sequence take covers consecutive shots and starts on the first one's keyframe
