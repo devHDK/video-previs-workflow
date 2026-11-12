@@ -16,7 +16,12 @@ mkdir -p "$PROJECT/.agents/skills" "$PROJECT/.claude/skills"
 # 새 설치만: 목적지 존재 시 먼저 확인
 [ ! -e "$PROJECT/.agents/skills/video-previs-workflow" ] && cp -R skills/video-previs-workflow "$PROJECT/.agents/skills/"
 [ ! -e "$PROJECT/.claude/skills/video-previs-workflow" ] && cp -R skills/video-previs-workflow "$PROJECT/.claude/skills/"
+# 선택: 기획 단계 스토리 설계 스킬
+[ ! -e "$PROJECT/.agents/skills/story-design" ] && cp -R skills/story-design "$PROJECT/.agents/skills/"
+[ ! -e "$PROJECT/.claude/skills/story-design" ] && cp -R skills/story-design "$PROJECT/.claude/skills/"
 ```
+
+`story-design`은 콘셉트에서 **핵심 목적 → 유도할 시청자 행동 → 둘에 맞는 스토리 구조**를 먼저 정하고 시간별 비트를 설계합니다. video-previs-workflow는 승인된 스토리 설계서를 요구하지만, story-design 설치는 선택입니다(설계서 필드만 확인).
 
 Agent Skills installer를 사용하는 경우 아래 방식도 사용할 수 있습니다. 설치 대상 호스트와 프로젝트/전역 범위는 설치기의 선택 화면에서 확인하세요. 실제 설치기 검증 여부는 [검증 기록](VALIDATION.md)을 참고하세요.
 
@@ -29,6 +34,8 @@ Codex에서는 `$video-previs-workflow`, Claude Code에서는 `/video-previs-wor
 ## 사용 예시
 
 > 이 캐릭터 사진과 새로운 마을 배경으로 12초 영상을 만들자. 먼저 점프 동작과 카메라를 프리비즈로 보고 싶어. 캐릭터 사진은 그대로 쓰고 배경 이미지는 검토 후 확정하자.
+
+> 이 콘셉트로 저장을 유도하는 22초 에피소드 스토리부터 설계하자.
 
 > 기존 프로젝트 상태를 읽고 이어서 진행해. 승인한 외형은 유지하고 두 번째 컷의 카메라만 바꾸자.
 
