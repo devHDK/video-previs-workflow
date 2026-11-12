@@ -1,9 +1,17 @@
 """Manual web generation: pack a job's inputs for a person to upload, then ingest the one result they drop back.
 Never edits project state and never drives a provider's web app."""
+import argparse
 import hashlib
+import json
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+from media import fresh_output, probe, video_duration
+
+EXTENSIONS = {'image': ('.png', '.jpg', '.jpeg', '.webp'), 'video': ('.mp4', '.mov')}
 
 
 def sha256(path):
@@ -43,3 +51,47 @@ def pack(job, root, out_dir):
     (out_dir / 'request.md').write_text('\n'.join(lines))
     (out_dir / 'output').mkdir()
     return records
+
+
+def ingest(pack_dir, dest, kind):
+    """Verify the one result in PACK_DIR/output/ decodes as KIND, copy it to DEST and describe it."""
+    exts = EXTENSIONS[kind]
+    files = [p for p in sorted((Path(pack_dir) / 'output').iterdir()) if p.is_file() and not p.name.startswith('.')]
+    if len(files) != 1: raise ValueError(f'output/ must contain exactly one result file; found {len(files)}')
+    src = files[0]
+    if src.suffix.lower() not in exts:
+        raise ValueError(f"expected {kind} file ({', '.join(exts)}); got {src.suffix or 'no extension'}")
+    try:
+        info = probe(src)
+        stream = next(s for s in info['streams'] if s.get('codec_type') == 'video')
+        # ffprobe exits 0 on a corrupt image; a decoded frame and real dimensions are the evidence
+        if not (int(stream.get('nb_read_frames') or 0) > 0 and stream.get('width') and stream.get('height')): raise ValueError
+    except (subprocess.CalledProcessError, StopIteration, ValueError):
+        raise ValueError(f'cannot decode {src.name}') from None
+    dest = fresh_output(dest)
+    shutil.copy2(src, dest)
+    duration = fps = None
+    if kind == 'video':
+        num, den = (int(x) for x in stream['r_frame_rate'].split('/'))
+        duration, fps = video_duration(dest), round(num / den, 3)
+    return {'dest': str(dest), 'sha256': sha256(dest), 'kind': kind, 'width': stream['width'],
+            'height': stream['height'], 'duration': duration, 'fps': fps}
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest='action', required=True)
+    q = sub.add_parser('pack', help='job.json -> upload folder with request.md (run from the project directory)')
+    q.add_argument('job'); q.add_argument('out_dir')
+    q = sub.add_parser('ingest', help='one result in PACK_DIR/output/ -> verified copy at DEST')
+    q.add_argument('pack_dir'); q.add_argument('dest'); q.add_argument('--kind', choices=sorted(EXTENSIONS), required=True)
+    a = p.parse_args()
+    try:
+        if a.action == 'pack': result = pack(json.loads(Path(a.job).read_text()), Path.cwd(), a.out_dir)
+        else: result = ingest(a.pack_dir, a.dest, a.kind)
+    except (ValueError, FileExistsError, FileNotFoundError) as e:
+        sys.exit(f'error: {e}')
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == '__main__': main()

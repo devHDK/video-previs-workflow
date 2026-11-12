@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
-import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -74,6 +75,63 @@ class PackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'job: model, prompt and inputs are required'):
             self.h.pack(self.job, self.root, self.out)
         self.assertFalse(self.out.exists())
+
+
+@unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+class IngestTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.pack = self.root / 'handoff/s01'
+        (self.pack / 'output').mkdir(parents=True)
+        self.h = load('handoff')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def media(self, name, video=False):
+        args = ['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=32x48:r=24:d=1']
+        args += ['-pix_fmt', 'yuv420p'] if video else ['-frames:v', '1', '-f', 'image2']
+        subprocess.run(args + [str(self.pack / 'output' / name)], check=True)
+
+    def test_ingest_image_ignores_hidden_and_case(self):
+        self.media('RESULT.PNG')
+        (self.pack / 'output/.DS_Store').write_bytes(b'x')
+        r = self.h.ingest(self.pack, self.root / 'kf/s01.png', 'image')
+        self.assertEqual((r['width'], r['height'], r['duration'], r['fps']), (32, 48, None, None))
+        self.assertEqual(r['sha256'], sha(self.root / 'kf/s01.png'))
+        self.assertEqual(r['kind'], 'image')
+
+    def test_ingest_video_reports_duration_and_fps(self):
+        self.media('take.mp4', video=True)
+        r = self.h.ingest(self.pack, self.root / 'take.mp4', 'video')
+        self.assertAlmostEqual(r['duration'], 1.0, places=1)
+        self.assertEqual(r['fps'], 24.0)
+
+    def test_zero_or_two_results_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.h.ingest(self.pack, self.root / 'x.png', 'image')
+        self.media('a.png'); self.media('b.png')
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            self.h.ingest(self.pack, self.root / 'x.png', 'image')
+
+    def test_kind_mismatch_rejected(self):
+        self.media('a.png')
+        with self.assertRaisesRegex(ValueError, 'expected video file'):
+            self.h.ingest(self.pack, self.root / 'x.mp4', 'video')
+
+    def test_undecodable_rejected(self):
+        (self.pack / 'output/result.png').write_bytes(b'not a png')
+        with self.assertRaisesRegex(ValueError, 'cannot decode result.png'):
+            self.h.ingest(self.pack, self.root / 'x.png', 'image')
+        self.assertFalse((self.root / 'x.png').exists())
+
+    def test_dest_exists_rejected(self):
+        self.media('a.png')
+        (self.root / 'x.png').write_bytes(b'keep')
+        with self.assertRaises(FileExistsError):
+            self.h.ingest(self.pack, self.root / 'x.png', 'image')
+        self.assertEqual((self.root / 'x.png').read_bytes(), b'keep')
 
 
 if __name__ == '__main__':
