@@ -96,6 +96,32 @@ def check_project(state, root):
     return errors + budget_errors(state)
 
 
+def check_submission(state, job, root):
+    """One paid job: its shot must be ready and the job must not eat the retry reserve unless it is a retry."""
+    if not isinstance(state, dict) or not isinstance(job, dict): return ['state and job must be objects']
+    sid = job.get('shot')
+    shot = next((s for s in _list(state.get('shots')) if isinstance(s, dict) and s.get('id') == sid), None)
+    if shot is None: return [f'{sid}: shot not found in state']
+    errors = story_errors(state, root)
+    if _dict(state.get('previs')).get('approval') != 'approved': errors.append('previs: approval required')
+    spec_errors, objects = spec_objects(state, root)
+    errors += spec_errors + shot_errors(state, shot, [] if spec_errors else objects.get(sid), root)
+    start = approved_start_sha(shot)
+    if start is not None and job.get('start_frame_sha256') != start:
+        errors.append(f'{sid}: job start frame is not the approved keyframe')
+    errors += budget_errors(state)
+    budget, quote = _dict(state.get('budget')), job.get('quote')
+    if not _number(quote): return errors + ['budget: job quote required']
+    num = lambda key: budget[key] if _number(budget.get(key)) else 0  # missing cap or max_attempts -> 0 -> blocked
+    available = num('cap') - num('settled') - num('reserved')
+    if job.get('retry_of'):
+        if quote > available: errors.append('budget: quote exceeds available credits')
+    elif available - quote < num('retry_reserve'):
+        errors.append('budget: submission would consume the retry reserve')
+    if num('attempts_used') >= num('max_attempts'): errors.append('budget: attempt limit reached')
+    return errors
+
+
 def _report(errors):
     print('\n'.join(errors) if errors else 'OK')
     sys.exit(1 if errors else 0)
@@ -105,9 +131,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='action', required=True)
     q = sub.add_parser('ready', help='whole project ready for paid video generation'); q.add_argument('state')
+    q = sub.add_parser('submit', help='one paid video job'); q.add_argument('state'); q.add_argument('job')
     a = p.parse_args()
     state_path = Path(a.state).resolve()
-    _report(check_project(json.loads(state_path.read_text()), state_path.parent))
+    state = json.loads(state_path.read_text())
+    if a.action == 'ready': _report(check_project(state, state_path.parent))
+    else: _report(check_submission(state, json.loads(Path(a.job).read_text()), state_path.parent))
 
 
 if __name__ == '__main__': main()

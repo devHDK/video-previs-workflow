@@ -113,5 +113,59 @@ class GateProjectTests(unittest.TestCase):
         self.assertIn('budget: retry_reserve must cover max_shot_quote', self.errors())
 
 
+class GateSubmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.g = load('gate')
+        self.state = ready_project(self.root)
+        self.budget = self.state['budget']
+        self.job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def errors(self):
+        return self.g.check_submission(self.state, self.job, self.root)
+
+    def test_submission_within_budget_passes(self):
+        self.assertEqual(self.errors(), [])
+
+    def test_submission_cannot_consume_retry_reserve(self):
+        self.budget['settled'] = 50
+        self.assertIn('budget: submission would consume the retry reserve', self.errors())
+
+    def test_retry_may_use_reserve_down_to_exact_quote(self):
+        self.budget['settled'] = 72
+        self.job['retry_of'] = 's01-v001'
+        self.assertEqual(self.errors(), [])
+
+    def test_retry_over_available_rejected(self):
+        self.budget['settled'] = 80
+        self.job['retry_of'] = 's01-v001'
+        self.assertIn('budget: quote exceeds available credits', self.errors())
+
+    def test_unresolved_reservation_counts(self):
+        self.budget['reserved'] = 50
+        self.assertIn('budget: submission would consume the retry reserve', self.errors())
+
+    def test_job_start_frame_must_match_keyframe(self):
+        self.job['start_frame_sha256'] = 'other'
+        self.assertIn('s01: job start frame is not the approved keyframe', self.errors())
+
+    def test_attempt_limit(self):
+        self.budget['attempts_used'] = 5
+        self.assertIn('budget: attempt limit reached', self.errors())
+
+    def test_unknown_shot(self):
+        self.job['shot'] = 's09'
+        self.assertIn('s09: shot not found in state', self.errors())
+
+    def test_other_shot_errors_do_not_block(self):
+        self.state['shots'].append({'id': 's02'})
+        self.assertEqual(self.errors(), [])
+        self.assertTrue(self.g.check_project(self.state, self.root))
+
+
 if __name__ == '__main__':
     unittest.main()
