@@ -60,3 +60,14 @@ Actual installation reported Blender 5.3.0. The previously skipped integration t
 After the fix, all 19 tests pass, including real PNG renders, audit output and reopening the saved .blend to check final-frame camera position and lens. No skips. A separate full 48-frame, 24 FPS, 360×640 tracking-jump render completed. Its configured framing/center-ray/contact checks covered all 48 integer frames and returned no findings. Frames 1, 24 and 48 were visually inspected; the entire sequence has not been visually reviewed or encoded into MP4.
 
 The user-installed Codex skill has been discovered in a live turn. Local `ffmpeg` and `ffprobe` remain unavailable, so media-helper encoding/muxing is still untested. Higgsfield is installed and enabled according to plugin discovery, but read-only profile/model calls returned `Unknown tool`; no provider account, model availability, upload or paid generation was verified and no credits were used.
+
+## 2026-11-12 story design and fidelity gates
+
+Trigger: review of the first generated scalp-immigration-ep01 edit (previs v004 vs selected takes, five relative points per shot) and client feedback that the story lacked conflict. Spec: `docs/superpowers/specs/2026-11-12-story-design-and-fidelity-gates-design.md`.
+
+- New `story-design` skill with `check_story.py`; `video-previs-workflow` gained `gate.py` (`ready`, `submit`), clip `start`/`speed`/`dialogue` limits in `media.py assemble`, and `media.py pair` contact sheets. Every new test was run red before its implementation.
+- Suite: 63 tests pass on this host (Python 3.11.7, Blender 5.3.0, local FFmpeg), including the Blender runtime test. `media.py pair` was run on real ep01 clips (s01, s04); the s04 take has audio longer than video and its last sample is still filled.
+- Retrospective check: `gate.py ready` on the unchanged ep01 `state.json` exits 1 with 143 lines: no approved story; `required_events` missing for s01–s07; no approved start keyframe for s01–s07; no retry reserve; and role decisions missing for every previs object, including `slide`, `tent`, `scanner`, `suitcase`, `seat`, `plane_window` and `counter`. These match the review findings (composition drift without keyframes, slide/tent continuity without prop assets, untracked required events, a 1.5-credit remainder with no retry room). Had the gate existed, the first paid video call would have been blocked.
+- Observation: shots with many set-dressing proxies (ten hair strands, five houses) need one `object_roles` entry each; mapping them to a set role or `null` is verbose but explicit.
+
+Not verified: paid keyframe or video generation through the new gates, live invocation of `story-design` from Claude Code or Codex, and whether keyframe start frames actually hold composition in the provider's models.
