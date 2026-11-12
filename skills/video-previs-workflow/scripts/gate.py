@@ -148,7 +148,7 @@ def continuity_errors(state, roles=None):
     uses = {}
     for shot in _list(state.get('shots')):
         if isinstance(shot, dict) and isinstance(shot.get('id'), str):
-            for role in set(r for r in _dict(shot.get('object_roles')).values() if isinstance(r, str)):
+            for role in dict.fromkeys(r for r in _dict(shot.get('object_roles')).values() if isinstance(r, str)):
                 uses.setdefault(role, {})[shot['id']] = approved_start_sha(shot)
     reviews = {r.get('role_id'): r for r in _list(state.get('continuity')) if isinstance(r, dict)}
     errors = []

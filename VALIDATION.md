@@ -96,3 +96,25 @@ Trigger: Higgsfield plan Unlimited applies only to manual generation on higgsfie
   - `state.json` hash was unchanged (02372f13… before and after).
 
 Not verified: an actual web generation and its ingest, slot names on the real provider screen, and video ingest of a provider-made MP4 (covered only by a synthetic ffmpeg clip).
+
+## 2026-11-12 keyframe continuity
+
+Trigger: on ep01-v2, start keyframes generated from per-shot prompts drifted between shots. Web Seedream 5.0 Lite produced wrong counts, mixed accessories, an armless bust and leaked set objects. With MCP Nano Banana Pro, the s02 floor came out as pale sand and the s03 floor as a dirt path. Each frame looked acceptable beside its previs frame. The user caught the mismatch only by viewing all keyframes side by side. Adding the approved s05 keyframe as a floor/set reference fixed both.
+
+- `media.py continuity STATE OUT` tiles each shot's current start keyframe (approved, else latest pending) into one row per role shared by 2+ shots. Cells are 270×480 and the row legend is printed as JSON.
+- `gate.py` (`ready`: all shared roles; `submit`: the job shot's roles) now requires an approved `continuity[]` record whose keyframe hashes equal the current approved keyframes. It reports a missing or stale review per role.
+- `production.md` adds the practices that fixed the keyframes:
+  - Output-resolution guide frames.
+  - Stand-in wording ("houses, not capped cylinders"; "a torso, not a box").
+  - Exact counts and accessory ownership.
+  - At most 4–5 references, with combined sheets and set images cleaned of stray objects.
+  - An anchor frame per location.
+  - A two-pass review: each frame beside its previs, then the continuity sheet across shots.
+- `delivery.md` adds a boundary check between consecutive takes that share a set role.
+- Each new test was run red before its implementation. The suite passed after each task.
+- ep01-v2 run (read-only, state hash unchanged):
+  - The sheet has 9 rows (traveler, purple, amber, village, mint, slide, tent, inspection set, inspector).
+  - `gate.py ready` reports exactly those 9 roles as needing review, and nothing else.
+  - The rows show one floor, light and character design across the village shots.
+
+Not verified: video takes against the boundary check (none generated yet). Rows also include shots where a role enters only after frame 1 (for example the stowaways in s02). That frame cannot show the role, so its consistency is checked only in the take.
