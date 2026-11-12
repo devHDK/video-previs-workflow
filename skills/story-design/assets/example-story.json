@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "concept": "Synthetic demo, not a creative default: a paper boat must carry a note across a rain puddle to a waiting snail.",
+  "purpose": "Show that small persistence wins against bigger obstacles.",
+  "audience": "Short-form viewers who enjoy tiny-world comedy",
+  "target_action": {
+    "action": "follow for part 2",
+    "cue": "End caption: Part 2 — the snail's reply",
+    "beat": "b5"
+  },
+  "structure": {
+    "id": "obstacle_payoff",
+    "why": "Persistence only reads when something actively pushes back; the payoff earns the follow."
+  },
+  "elements": [
+    {"id": "frog_antagonist", "serves": "purpose", "why": "An active blocker makes the boat's persistence visible."},
+    {"id": "unread_reply", "serves": "target_action", "why": "An unopened reply gives a reason to follow for part 2."}
+  ],
+  "beats": [
+    {"id": "b1", "start": 0, "end": 2, "event": "The boat launches with the folded note on deck.", "emotion": "curiosity", "tension": 1, "serves": "purpose"},
+    {"id": "b2", "start": 2, "end": 5, "event": "A gust spins the boat back toward shore.", "emotion": "worry", "tension": 3, "serves": "purpose", "obstacle": "The wind actively pushes the boat backwards."},
+    {"id": "b3", "start": 5, "end": 8, "event": "A frog plants itself in the boat's path and swats at the note.", "emotion": "alarm", "tension": 4, "serves": "purpose", "obstacle": "The frog blocks the route and tries to knock the note off."},
+    {"id": "b4", "start": 8, "end": 10, "event": "The boat rides the frog's splash over it and docks beside the snail.", "emotion": "relief", "tension": 5, "serves": "purpose"},
+    {"id": "b5", "start": 10, "end": 12, "event": "The snail reads the note and slides a sealed reply back aboard.", "emotion": "anticipation", "tension": 2, "serves": "target_action"}
+  ],
+  "payoff_beat": "b4"
+}
