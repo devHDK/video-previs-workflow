@@ -63,7 +63,7 @@ The user-installed Codex skill has been discovered in a live turn. Local `ffmpeg
 
 ## 2026-11-12 story design and fidelity gates
 
-Trigger: review of the first generated scalp-immigration-ep01 edit (previs v004 vs selected takes, five relative points per shot) and client feedback that the story lacked conflict.
+Trigger: review of the first generated ep01 edit (previs v004 vs selected takes, five relative points per shot) and review feedback that the story lacked conflict.
 
 - New `story-design` skill with `check_story.py`; `video-previs-workflow` gained `gate.py` (`ready`, `submit`), clip `start`/`speed`/`dialogue` limits in `media.py assemble`, and `media.py pair` contact sheets. Every new test was run red before its implementation.
 - Suite: 63 tests pass on this host (Python 3.11.7, Blender 5.3.0, local FFmpeg), including the Blender runtime test. `media.py pair` was run on real ep01 clips (s01, s04); the s04 take has audio longer than video and its last sample is still filled.
@@ -89,7 +89,7 @@ Trigger: Higgsfield plan Unlimited applies only to manual generation on higgsfie
 
 - `handoff.py pack` (job.json → `NN-<slot>.<ext>` uploads, `request.md`, empty `output/`, input hashes) and `ingest` (one non-hidden result, kind and decode check, refuse overwrite, hash/size/duration/fps). `gate.py` now accepts `max_shot_quote: 0` with `retry_reserve: 0` for all-web-Unlimited plans, and a job quoted above 0 is still rejected. Docs add the manual route, the `handed_off` job state and a ban on automating provider web apps. Each new test was run red before its implementation. The suite has 104 passing tests.
 - While running the tests, ffprobe exited 0 on a corrupt PNG, reporting 0×0 and decoding no frames. `ingest` now requires a decoded frame and nonzero dimensions.
-- Rehearsal on `../projects/scalp-immigration-ep01-v2` (s01 start keyframe job, Seedream 5.0 Lite, 5 inputs: previs v003 f1 plus the traveler, purple, amber and cabin images):
+- Rehearsal on `../projects/ep01-v2` (s01 start keyframe job, Seedream 5.0 Lite, 5 inputs: previs v003 f1 plus the traveler, purple, amber and cabin images):
   - `pack` printed 5 hashes and a readable `request.md`.
   - `ingest` of a dropped PNG returned 360×640 with a matching hash.
   - A second `ingest` to the same destination exited 1.

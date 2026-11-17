@@ -6,7 +6,7 @@ Claude Code와 Codex에서 함께 사용하는 프리비즈 기반 영상 제작
 
 ## 설치
 
-비공개 저장소에는 접근 권한과 GitHub 인증이 필요합니다. 저장소를 clone한 뒤 아래 **같은 스킬 폴더 전체**를 각 호스트의 프로젝트 스킬 경로로 복사합니다. `PROJECT`를 실제 작업 프로젝트 경로로 설정하세요. 기존 설치가 있다면 덮어쓰지 말고 차이를 확인하세요.
+저장소를 clone한 뒤 아래 **같은 스킬 폴더 전체**를 각 호스트의 프로젝트 스킬 경로로 복사합니다. `PROJECT`를 실제 작업 프로젝트 경로로 설정하세요. 기존 설치가 있다면 덮어쓰지 말고 차이를 확인하세요.
 
 ```sh
 git clone https://github.com/devHDK/video-previs-workflow.git
@@ -94,3 +94,7 @@ python3 skills/story-design/scripts/check_story.py skills/story-design/assets/ex
 실제 실행 결과와 검증하지 않은 범위는 [VALIDATION.md](VALIDATION.md)에 기록합니다.
 
 유료 제작 전에 작업별 범위·비용 상한·최대 시도 횟수를 승인합니다. 스킬을 설치하거나 실행하겠다는 말만으로 생성 크레딧 사용을 승인한 것으로 처리하지 않습니다.
+
+## 라이선스
+
+[MIT](LICENSE)
