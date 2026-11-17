@@ -93,6 +93,11 @@ def sample_times(duration, points):
     return times
 
 
+def clamp_times(times, duration):
+    last = max(0, duration - 0.05)  # seeking to the exact end returns no frame
+    return [min(max(t, 0), last) for t in times]
+
+
 def video_duration(path):
     info = probe(path)
     video = next(s for s in info['streams'] if s['codec_type'] == 'video')
@@ -100,13 +105,17 @@ def video_duration(path):
     return float(video.get('duration') or info['format']['duration'])
 
 
-def pair(top, bottom, output, points=5):
-    """Two-row contact sheet: top row from `top`, bottom row from `bottom`, at the same relative times."""
+def pair(top, bottom, output, points=5, times=None):
+    """Two-row contact sheet: top row from `top`, bottom row from `bottom`, at the same relative times,
+    or at the given seconds (event times), each clamped to its own source."""
+    if times is not None and len(times) < 2: raise ValueError('times must list 2 or more seconds')
+    if times is not None: points = len(times)
     output = fresh_output(output)
     with tempfile.TemporaryDirectory(prefix='video-pair-') as temp:
         frames = []
         for row, source in enumerate((top, bottom)):
-            for i, t in enumerate(sample_times(video_duration(source), points)):
+            duration = video_duration(source)
+            for i, t in enumerate(clamp_times(times, duration) if times is not None else sample_times(duration, points)):
                 frame = Path(temp) / f'{row}-{i}.png'
                 run(['ffmpeg', '-v', 'error', '-n', '-ss', f'{t:.3f}', '-i', source, '-frames:v', '1',
                      '-vf', 'scale=270:480:force_original_aspect_ratio=decrease,pad=270:480:(ow-iw)/2:(oh-ih)/2', frame])
@@ -193,9 +202,10 @@ def cuts(source, output_dir, threshold=0.3):
         shot['clip'] = str(out / f'{sid}.mp4')
         run(['ffmpeg', '-v', 'error', '-n', '-ss', f'{start:.3f}', '-i', source, '-t', f'{end - start:.3f}', '-an',
              '-c:v', 'libx264', '-pix_fmt', 'yuv420p', shot['clip']])
-        shot.update(camera='', action='', events=[])
+        shot.update(camera='', camera_evidence=[], action='', events=[])
     draft = {'version': 1, 'source': {'path': str(source), 'sha256': hashlib.sha256(Path(source).read_bytes()).hexdigest(),
-                                      'fps': int(num) / int(den), 'duration': duration}, 'shots': shots}
+                                      'fps': int(num) / int(den), 'duration': duration},
+             'setup': dict.fromkeys(('premise', 'tone', 'avoid', 'lead', 'setting'), ''), 'shots': shots}
     (out / 'reference-draft.json').write_text(json.dumps(draft, indent=2))
     return draft
 
@@ -205,11 +215,12 @@ def main():
     sub = p.add_subparsers(dest='action', required=True)
     q = sub.add_parser('probe'); q.add_argument('input')
     q = sub.add_parser('extract'); q.add_argument('input'); q.add_argument('output_dir'); q.add_argument('--every', type=float, default=1)
-    q = sub.add_parser('encode'); q.add_argument('sequence', help='PNG pattern, e.g. frame_%04d.png'); q.add_argument('output'); q.add_argument('--fps', type=int, required=True)
+    q = sub.add_parser('encode'); q.add_argument('sequence', help='PNG pattern, e.g. frame_%%04d.png'); q.add_argument('output'); q.add_argument('--fps', type=int, required=True)
     q = sub.add_parser('assemble'); q.add_argument('manifest'); q.add_argument('output')
     q = sub.add_parser('compare'); q.add_argument('left'); q.add_argument('right'); q.add_argument('output')
     q = sub.add_parser('pair', help='previs-over-take contact sheet'); q.add_argument('top'); q.add_argument('bottom')
     q.add_argument('output'); q.add_argument('--points', type=int, default=5)
+    q.add_argument('--times', help='comma-separated seconds applied to both sources, e.g. 0.24,7.4; replaces --points')
     q = sub.add_parser('continuity', help='keyframes per role shared by 2+ shots'); q.add_argument('state'); q.add_argument('output')
     q = sub.add_parser('cuts', help='draft reference breakdown from detected cuts'); q.add_argument('input')
     q.add_argument('output_dir'); q.add_argument('--threshold', type=float, default=0.3)
@@ -217,7 +228,8 @@ def main():
     if a.action == 'probe': print(json.dumps(probe(a.input), indent=2))
     elif a.action == 'cuts': print(json.dumps(cuts(a.input, a.output_dir, a.threshold), indent=2))
     elif a.action == 'continuity': print(json.dumps(continuity(a.state, a.output), indent=2))
-    elif a.action == 'pair': pair(a.top, a.bottom, a.output, a.points)
+    elif a.action == 'pair':
+        pair(a.top, a.bottom, a.output, a.points, [float(t) for t in a.times.split(',')] if a.times else None)
     elif a.action == 'assemble': assemble(a.manifest, a.output)
     elif a.action == 'extract':
         if a.every <= 0: raise ValueError('--every must be positive')

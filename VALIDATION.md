@@ -134,3 +134,18 @@ Trigger: on ep01-v2 the first three web takes (Seedance 2.5, 0 credits) were eac
 - Handoff folders are now staged (`handoff/assets|keyframes|videos/<id>`). The ep01-v2 folders were moved and `jobs[].pack_path` updated (16 folders). No unprocessed results were present.
 
 Not verified: the sequence takes themselves (seq-s02-s03 and seq-s05-s06 are packed and waiting for web generation), including whether Seedance 2.5 keeps the 19 s discovery at 6.0 s inside an 8 s take.
+
+## 2026-11-17 lessons from a reference-led single-take production
+
+Source of the changes: one reference-led production (a 25 s single take, kept outside this repository). Each failure seen there became a gate check, a script option or a reference rule.
+
+- Tests: 189 pass (`python3 -m unittest discover -s tests`, Python 3.11.7, Blender 5.3.0, ffmpeg present); 127 before. Every new check and option was written test-first and seen failing.
+- Independent review of the whole change (fresh reviewer, about 70 legacy and wrong-type inputs run against the gate; option errors run under Blender): no critical finding. Five findings were fixed test-first afterwards: a split take is now an error when `gate.py reference` is run without `--max-duration`; `state.py` keeps the lock and the reservation for an `unknown` job, counts an attempt when a job is settled without `submit`, no longer crashes on a malformed job already in state, prints one error line for a missing or broken state file, and no longer drops a lock taken by someone else when a returned manual take is settled.
+- New gate checks (all report malformed input instead of raising): `setup` on story and reference files, `review_notes` closed before approval, asset `kind` and shot `props`, `generation_profile` with a take-length limit, `camera_evidence` and the one-take rule on reference breakdowns, paid-only attempt limit.
+- Run on the production's own files (scene of 226 proxy objects, 600 frames, 360×640):
+  - `render_previs.py --audit-only`: 12.8 s. With `audit.groups` and `crop_ok` it reports 8 findings, all `center_occluded` at frames 220-241 (9.1-10.0 s), where the lead is behind the front row on purpose. The same scene without them reported an issue on most sampled frames, which had hidden a real occlusion.
+  - `render_previs.py --frames` with 13 event frames: 23.7 s. During the production a review-only pass of the same scene rendered 273 stills in 3 min 47 s and each full render took about 10 minutes.
+  - `media.py pair --times` with 13 times, reference crop against previs: 3.0 s, sheet 3510×960.
+  - `gate.py ready` on the production's state, after filling the profile, kinds, props and notes: it reported exactly the two fields still missing there (`reference: setup …`, `reference s01: camera_evidence …`). After a reference version with a user-chosen `setup` and measured `camera_evidence` was approved through `state.py approve`, `gate.py reference --max-duration 30` and `gate.py ready` both printed `OK`.
+
+Not verified: a new production started under these rules. The setup draft-first step, the risk review before a first take and the stills-first previs loop are documented and unit-checked, but no project has yet been run through them from the start. `crop_ok` applies to a subject for the whole shot; a long take that opens on a close-up cannot limit it to the first seconds.

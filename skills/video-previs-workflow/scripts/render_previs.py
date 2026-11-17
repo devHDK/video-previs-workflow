@@ -1,9 +1,10 @@
-"""Background-only Blender renderer: -- SPEC NEW_OUTPUT_DIR [--review-only].
+"""Background-only Blender renderer: -- SPEC NEW_OUTPUT_DIR [--review-only] [--frames 1,24] [--size WxH] [--shot ID] [--audit-only].
 Writes per-shot .blend, audit.json, handoff.json, review stills and optionally full PNG sequences.
 """
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -94,43 +95,79 @@ def build_shot(bpy, spec, shot):
     return scene, objects
 
 
+def stills_for(shot, picked=None):
+    """Review stills: first, middle, last and the shot's review_frames; or exactly the picked frames."""
+    n = shot['frames']
+    if picked is None: return sorted({1, (n + 1) // 2, n} | set(shot.get('review_frames', [])))
+    for frame in picked:
+        if not 1 <= frame <= n: raise ValueError(f"{shot['id']}: frame {frame} is outside 1..{n}")
+    return sorted(set(picked))
+
+
+def parse_size(text):
+    match = re.fullmatch(r'(\d+)x(\d+)', text)
+    width, height = (int(v) for v in match.groups()) if match else (0, 0)
+    if width <= 0 or height <= 0 or width % 2 or height % 2:
+        raise ValueError('--size must be WxH with even positive integers')
+    return width, height
+
+
+def pick_shots(spec, shot_id):
+    shots = [s for s in spec['shots'] if shot_id is None or s['id'] == shot_id]
+    if not shots: raise ValueError(f'unknown shot {shot_id}')
+    return shots
+
+
 def main():
     args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('spec', type=Path); p.add_argument('output', type=Path)
     p.add_argument('--review-only', action='store_true')
+    p.add_argument('--frames', help='comma-separated shot-local frames: render only these stills')
+    p.add_argument('--size', help='WxH for this run, e.g. 1080x1920 for keyframe guides')
+    p.add_argument('--shot', help='render only this shot id')
+    p.add_argument('--audit-only', action='store_true', help='write audit.json per shot; render nothing')
     options = p.parse_args(args)
     spec = json.loads(options.spec.read_text()); errors = validate(spec)
     if errors: raise SystemExit('\n'.join(errors))
+    # Every option is checked before Blender builds anything or the output folder exists.
+    if options.size: spec['width'], spec['height'] = parse_size(options.size)
+    picked = [int(f) for f in options.frames.split(',')] if options.frames else None
+    shots = pick_shots(spec, options.shot)
+    stills = {shot['id']: stills_for(shot, picked) for shot in shots}
+    starts, position = {}, 0
+    for shot in spec['shots']: starts[shot['id']] = position; position += shot['frames']
     import bpy
     if not bpy.app.background:
         raise RuntimeError('Use a separate --background Blender process; this renderer resets its own scene.')
     output = options.output.resolve(); output.mkdir(parents=True, exist_ok=False)
     summary = []
-    offset = 0
-    for shot in spec['shots']:
+    for shot in shots:
         scene, objects = build_shot(bpy, spec, shot)
         folder = output / shot['id']; folder.mkdir()
         audit = audit_scene(scene, shot, objects)
         (folder / 'audit.json').write_text(json.dumps(audit, indent=2))
+        if options.audit_only:
+            print(json.dumps({'shot': shot['id'], 'status': audit['status'], 'findings': len(audit['findings'])}))
+            continue
         scene.render.image_settings.file_format = 'PNG'
         scene.render.filepath = str(folder / 'frame_')
         bpy.ops.wm.save_as_mainfile(filepath=str(folder / 'scene.blend'))
-        review_frames = sorted({1, (shot['frames'] + 1)//2, shot['frames']} |
-                               {k['frame'] for o in shot['objects'] for k in o['keys']} |
-                               {k['frame'] for k in shot['camera'].get('keys', [])})
+        review_frames = stills[shot['id']]
         try:
             for frame in review_frames:
                 scene.frame_set(frame); scene.render.filepath = str(folder / f'review_{frame:04d}.png')
                 bpy.ops.render.render(write_still=True)
         finally:
             scene.frame_set(1); scene.render.filepath = str(folder / 'frame_')
-        if not options.review_only: bpy.ops.render.render(animation=True)
+        stills_only = options.review_only or picked is not None
+        if not stills_only: bpy.ops.render.render(animation=True)
+        offset = starts[shot['id']]
         summary.append({'shot': shot['id'], 'start_frame': offset, 'end_frame_exclusive': offset + shot['frames'],
                         'review_frames': review_frames, 'audit_status': audit['status'],
                         'camera': shot['camera'], 'roles': [{'id': o['id'], 'shape': o['shape'], 'color': o['color']} for o in shot['objects']]})
-        offset += shot['frames']
-    (output / 'handoff.json').write_text(json.dumps({'fps': spec['fps'], 'review_only': options.review_only,
+    if options.audit_only: return
+    (output / 'handoff.json').write_text(json.dumps({'fps': spec['fps'], 'review_only': options.review_only or picked is not None,
         'timeline_convention': 'zero-based end-exclusive', 'shots': summary}, indent=2))
     print(f'Previs artifacts saved: {output}; inspect audit findings and actual review images before approval.')
 

@@ -28,6 +28,20 @@ class StoryTests(unittest.TestCase):
         self.assertEqual(self.s['structure']['id'], 'obstacle_payoff')
         self.assertEqual(self.errors(), [])
 
+    def test_setup_fields_required(self):
+        for field in self.m.SETUP_FIELDS:
+            self.s = json.loads((SKILL / 'assets/example-story.json').read_text()); del self.s['setup'][field]
+            self.assertIn(f'setup.{field} is required', self.errors())
+
+    def test_setup_hook_is_optional(self):
+        del self.s['setup']['hook']  # not every piece has a joke or a twist
+        self.assertEqual(self.errors(), [])
+
+    def test_setup_wrong_type_reported_not_raised(self):
+        self.s['setup'] = 'funny'
+        self.assertEqual([e for e in self.errors() if e.startswith('setup.')],
+                         [f'setup.{f} is required' for f in self.m.SETUP_FIELDS])
+
     def test_non_object(self):
         self.assertEqual(self.m.check([]), ['story must be an object'])
 

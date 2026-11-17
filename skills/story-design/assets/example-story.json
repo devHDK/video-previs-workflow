@@ -1,6 +1,14 @@
 {
   "version": 1,
   "concept": "Synthetic demo, not a creative default: a paper boat must carry a note across a rain puddle to a waiting snail.",
+  "setup": {
+    "premise": "A paper boat must carry a note across a rain puddle to a waiting snail.",
+    "tone": "Gentle tiny-world comedy",
+    "avoid": "Peril that feels real or sad",
+    "lead": "A stubborn paper boat that wants to deliver its note",
+    "setting": "A sidewalk puddle just after rain, late afternoon",
+    "hook": "Huge effort for a tiny delivery, and the snail takes its time replying"
+  },
   "purpose": "Show that small persistence wins against bigger obstacles.",
   "audience": "Short-form viewers who enjoy tiny-world comedy",
   "target_action": {

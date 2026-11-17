@@ -14,6 +14,14 @@ def _dict(value): return value if isinstance(value, dict) else {}
 def _list(value): return value if isinstance(value, list) else []
 def _text(value): return isinstance(value, str) and value.strip() != ''
 def _number(value): return type(value) in (int, float)
+def _positive(value): return _number(value) and value > 0
+
+
+SETUP_FIELDS = ('premise', 'tone', 'avoid', 'lead', 'setting')  # required; `hook` is optional. Same in story-design check_story.py
+SETUP_NEEDED = 'setup needs premise, tone, avoid, lead and setting'
+
+
+def _setup_ok(data): return all(_text(_dict(_dict(data).get('setup')).get(field)) for field in SETUP_FIELDS)
 
 
 def _unchanged(root, record):
@@ -27,19 +35,21 @@ def _approved(state, key): return _dict(state.get(key)).get('approval') == 'appr
 def frame_at(t, fps): return int(t * fps + 0.5)  # round each cut once, so shot lengths never drift
 
 
-def check_reference(ref, spec=None):
-    """Reference breakdown shape; given the previs spec, also each shot's frames against the reference cuts."""
+def check_reference(ref, spec=None, max_duration=None):
+    """Reference breakdown shape; given the previs spec, also each shot's frames against the reference cuts;
+    given the model's longest take, also that a continuous source take was not split while it fits."""
     if not isinstance(ref, dict): return ['reference must be an object']
     source, errors = _dict(ref.get('source')), []
     if not (_text(source.get('path')) and _text(source.get('sha256'))):
         errors.append('reference: source.path and source.sha256 are required')
+    if not _setup_ok(ref): errors.append(f'reference: {SETUP_NEEDED}')
     shots = ref.get('shots')
     if not isinstance(shots, list) or not shots: return errors + ['reference: shots must be a nonempty list']
     fps = _dict(spec).get('fps')
     if spec is not None and not (_number(fps) and fps > 0):
         errors.append('previs: spec fps required for reference timing'); spec = None
     frames = {s.get('id'): s.get('frames') for s in _list(_dict(spec).get('shots')) if isinstance(s, dict)}
-    ids, previous_end = set(), 0
+    ids, previous_end, runs = set(), 0, []  # runs: [first shot id, seconds, shots] per uncut source take
     for shot in shots:
         sid = shot.get('id') if isinstance(shot, dict) else None
         if not _text(sid) or sid in ids: errors.append('reference: shot id must be unique and nonempty'); continue
@@ -51,6 +61,16 @@ def check_reference(ref, spec=None):
         previous_end = end
         if not (_text(shot.get('camera')) and _text(shot.get('action'))):
             errors.append(f'reference {sid}: camera and action are required')
+        samples = [e for e in map(_dict, _list(shot.get('camera_evidence'))) if _number(e.get('t')) and start <= e['t'] <= end
+                   and (_positive(e.get('subject_px')) or _positive(e.get('background_px')))]
+        if len(samples) < 2 or len(samples) != len(_list(shot.get('camera_evidence'))):  # measured, not eyeballed
+            errors.append(f'reference {sid}: camera_evidence needs 2+ samples with t and subject_px or background_px')
+        if shot.get('continues_previous') is True:
+            if not runs: errors.append(f'reference {sid}: continues_previous on the first shot')
+            elif not _text(shot.get('split_reason')):
+                errors.append(f'reference {sid}: split_reason is required when a shot continues the previous one')
+        if shot.get('continues_previous') is True and runs: runs[-1][1] += end - start; runs[-1][2] += 1
+        else: runs.append([sid, end - start, 1])
         for event in map(_dict, _list(shot.get('events'))):
             t = event.get('t')
             if not (_number(t) and _text(event.get('event'))): errors.append(f'reference {sid}: events need t and event')
@@ -59,6 +79,11 @@ def check_reference(ref, spec=None):
         expected = frame_at(end, fps) - frame_at(start, fps)
         if sid not in frames: errors.append(f'reference {sid}: shot not in previs spec')
         elif frames[sid] != expected: errors.append(f'{sid}: previs frames {frames[sid]} differ from reference timing {expected}')
+    if _positive(max_duration):
+        errors += [f'reference {first}: take of {seconds:.1f} s fits max_duration_s {max_duration:g}; merge the split shots'
+                   for first, seconds, count in runs if count > 1 and seconds <= max_duration]
+    elif any(count > 1 for first, seconds, count in runs):  # an unchecked split would only be caught at `ready`, after previs
+        errors.append('reference: a split take needs --max-duration (generation_profile.max_duration_s) to be checked')
     return errors
 
 
@@ -71,7 +96,7 @@ def reference_errors(state, root):
     if isinstance(path, str) and (root / path).is_file():  # a missing spec is reported by spec_objects
         try: spec = _dict(json.loads((root / path).read_text()))
         except ValueError: pass
-    return check_reference(ref, spec)
+    return check_reference(ref, spec, _dict(state.get('generation_profile')).get('max_duration_s'))
 
 
 def story_errors(state, root):
@@ -87,10 +112,11 @@ def _story_file_errors(state, root):
     if not _unchanged(root, story): return ['story: file missing or changed since approval']
     try: data = _dict(json.loads((root / story['path']).read_text()))
     except ValueError: data = {}
+    errors = [] if _setup_ok(data) else [f'story: {SETUP_NEEDED}']
     if _text(data.get('purpose')) and _text(_dict(data.get('target_action')).get('action')) \
             and _text(_dict(data.get('structure')).get('id')):
-        return []
-    return ['story: purpose, target_action and structure are required']
+        return errors
+    return ['story: purpose, target_action and structure are required'] + errors
 
 
 def spec_objects(state, root):
@@ -133,6 +159,12 @@ def shot_errors(state, shot, objects, root):
     for role in dict.fromkeys(r for r in roles.values() if isinstance(r, str)):
         if not approved.get(role, set()) & bound.get(role, set()):
             errors.append(f'{sid}: role {role} needs an approved asset bound to this shot')
+    props = {a['role_id'] for a in map(_dict, _list(state.get('assets')))
+             if isinstance(a.get('role_id'), str) and a.get('approval') == 'approved' and a.get('kind') == 'prop'}
+    for role in dict.fromkeys(r for r in roles.values() if isinstance(r, str) and r in props):
+        handling = _dict(_dict(shot.get('props')).get(role))  # a prop with no stated source appears from nowhere in the take
+        if not all(_text(handling.get(key)) for key in ('origin', 'holder', 'exit')):
+            errors.append(f'{sid}: prop {role} needs origin, holder and exit')
     starts = [k for k in _list(shot.get('keyframes'))
               if isinstance(k, dict) and k.get('kind') == 'start' and k.get('approval') == 'approved']
     if not starts: errors.append(f'{sid}: approved start keyframe required')
@@ -166,6 +198,61 @@ def continuity_errors(state, roles=None):
     return errors
 
 
+PROFILE_NEEDED = 'generation_profile: model, max_duration_s and duration_step_s are required'
+
+
+def profile_errors(state):
+    """What the generator can do decides shot structure, so it is recorded before the story or reference is approved."""
+    profile = _dict(state.get('generation_profile'))
+    ok = _text(profile.get('model')) and _positive(profile.get('max_duration_s')) and _positive(profile.get('duration_step_s'))
+    return [] if ok else [PROFILE_NEEDED]
+
+
+def _spec(state, root):
+    path = _dict(state.get('previs')).get('spec_path')
+    if not isinstance(path, str) or not (root / path).is_file(): return {}
+    try: return _dict(json.loads((root / path).read_text()))
+    except ValueError: return {}
+
+
+def duration_errors(state, root, shot_ids=None):
+    """A take longer than the model's limit cannot be generated: every shot, or the sum of a job's covered shots."""
+    limit, spec = _dict(state.get('generation_profile')).get('max_duration_s'), _spec(state, root)
+    fps = spec.get('fps')
+    if not (_positive(limit) and _positive(fps)): return []  # a missing profile is reported by profile_errors
+    seconds = {s.get('id'): s['frames'] / fps for s in map(_dict, _list(spec.get('shots')))
+               if isinstance(s.get('id'), str) and _number(s.get('frames'))}
+    over = lambda who, value: [f'{who} {value:.1f} s exceeds generation_profile.max_duration_s {limit:g}'] if value > limit else []
+    if shot_ids is not None:
+        return over('job: take of', sum(seconds.get(sid, 0) for sid in shot_ids if isinstance(sid, str)))
+    return [e for shot in map(_dict, _list(state.get('shots'))) if isinstance(shot.get('id'), str)
+            for e in over(f"{shot['id']}:", seconds.get(shot['id'], 0))]
+
+
+def kind_errors(state):
+    return [f"asset {a.get('role_id')} {a.get('version')}: kind must be character, prop or set"
+            for a in map(_dict, _list(state.get('assets')))
+            if a.get('approval') == 'approved' and a.get('kind') not in ('character', 'prop', 'set')]
+
+
+def unresolved_notes(record):
+    """A review note is closed as fixed or accepted, with evidence; anything else blocks approval."""
+    notes = _dict(record).get('review_notes')
+    if notes is None: return False
+    return not isinstance(notes, list) or any(
+        _dict(n).get('resolution') not in ('fixed', 'accepted') or not _text(_dict(n).get('evidence')) for n in notes)
+
+
+def note_errors(state):
+    """Defects noted in review may not ride along on an approved asset or keyframe."""
+    errors = [f"asset {a.get('role_id')} {a.get('version')}: unresolved review note" for a in map(_dict, _list(state.get('assets')))
+              if a.get('approval') == 'approved' and unresolved_notes(a)]
+    for shot in map(_dict, _list(state.get('shots'))):
+        errors += [f"{shot.get('id')}: keyframe {k.get('path')}: unresolved review note" for k in map(_dict, _list(shot.get('keyframes')))
+                   if k.get('approval') == 'approved' and unresolved_notes(k)]
+    return errors
+
+
 def budget_errors(state):
     budget = _dict(state.get('budget'))
     reserve, quote = budget.get('retry_reserve'), budget.get('max_shot_quote')
@@ -186,7 +273,8 @@ def check_project(state, root):
         errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root)
         for role, shas in _shas(shot.get('asset_bindings')).items(): versions.setdefault(role, set()).update(shas)
     errors += [f'role {role} is bound to different versions across shots' for role, shas in versions.items() if len(shas) > 1]
-    return errors + continuity_errors(state) + budget_errors(state)
+    return (errors + continuity_errors(state) + kind_errors(state) + note_errors(state) + profile_errors(state)
+            + duration_errors(state, root) + budget_errors(state))
 
 
 def check_submission(state, job, root):
@@ -208,6 +296,7 @@ def check_submission(state, job, root):
         errors += shot_errors(state, by_id[cid], [] if spec_errors else objects.get(cid), root)
         roles |= {r for r in _dict(by_id[cid].get('object_roles')).values() if isinstance(r, str)}
     errors += continuity_errors(state, roles)
+    errors += kind_errors(state) + note_errors(state) + profile_errors(state) + duration_errors(state, root, covered)
     start = approved_start_sha(shot)
     if start is not None and job.get('start_frame_sha256') != start:
         errors.append(f'{sid}: job start frame is not the approved keyframe')
@@ -224,7 +313,8 @@ def check_submission(state, job, root):
         if quote > available: errors.append('budget: quote exceeds available credits')
     elif available - quote < num('retry_reserve'):
         errors.append('budget: submission would consume the retry reserve')
-    if num('attempts_used') >= num('max_attempts'): errors.append('budget: attempt limit reached')
+    paid = not (job.get('route') == 'manual' and quote == 0)  # the limit counts paid submissions; free manual takes are only tallied
+    if paid and num('attempts_used') >= num('max_attempts'): errors.append('budget: attempt limit reached')
     return errors
 
 
@@ -239,8 +329,9 @@ def main():
     q = sub.add_parser('ready', help='whole project ready for paid video generation'); q.add_argument('state')
     q = sub.add_parser('submit', help='one paid video job'); q.add_argument('state'); q.add_argument('job')
     q = sub.add_parser('reference', help='reference breakdown file, before approval'); q.add_argument('file')
+    q.add_argument('--max-duration', type=float, help="the model's longest take in seconds, to check split takes")
     a = p.parse_args()
-    if a.action == 'reference': _report(check_reference(json.loads(Path(a.file).read_text())))
+    if a.action == 'reference': _report(check_reference(json.loads(Path(a.file).read_text()), max_duration=a.max_duration))
     state_path = Path(a.state).resolve()
     state = json.loads(state_path.read_text())
     if a.action == 'ready': _report(check_project(state, state_path.parent))

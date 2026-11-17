@@ -119,6 +119,30 @@ class EditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.sample_times(4.0, 1)
 
+    def test_clamp_times(self):
+        self.assertEqual(module('media').clamp_times([-1, 0.24, 25.0, 30], 25.0), [0, 0.24, 24.95, 24.95])
+
+    def test_pair_needs_two_times(self):
+        with self.assertRaisesRegex(ValueError, 'times must list 2 or more seconds'):
+            module('media').pair('a.mp4', 'b.mp4', Path(tempfile.gettempdir()) / 'never-written.jpg', times=[1.0])
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+    def test_pair_at_times_builds_one_column_per_time(self):
+        m = module('media')
+        with tempfile.TemporaryDirectory() as t:
+            a, b, out = Path(t) / 'a.mp4', Path(t) / 'b.mp4', Path(t) / 'sheet.jpg'
+            for path, color in ((a, 'red'), (b, 'blue')):
+                subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'color=c={color}:s=64x64:r=24:d=1',
+                                '-pix_fmt', 'yuv420p', str(path)], check=True)
+            m.pair(a, b, out, times=[0, 0.5, 5])  # 5 s is past both clips: clamped, not an error
+            video = m.probe(out)['streams'][0]
+            self.assertEqual((video['width'], video['height']), (810, 960))
+
+    def test_every_media_subcommand_help_exits_zero(self):
+        for sub in ('probe', 'extract', 'encode', 'assemble', 'compare', 'pair', 'continuity', 'cuts'):
+            done = subprocess.run([sys.executable, str(SCRIPTS / 'media.py'), sub, '--help'], capture_output=True)
+            self.assertEqual(done.returncode, 0, sub)
+
 class CutTests(unittest.TestCase):
     def test_shots_from_cuts_cover_duration(self):
         self.assertEqual(module('media').shots_from_cuts([3.5, 1.5, 0, 4.75], 4.75), [
@@ -144,7 +168,8 @@ class CutTests(unittest.TestCase):
             for shot in draft['shots']:
                 for path in shot['stills'] + [shot['clip']]: self.assertTrue(Path(path).is_file(), path)
             self.assertEqual(json.loads((out / 'reference-draft.json').read_text()), draft)
-            self.assertEqual(gate.check_reference(draft), [f'reference {s}: camera and action are required' for s in ('s01', 's02')])
+            self.assertLessEqual({f'reference {s}: camera and action are required' for s in ('s01', 's02')},
+                                 set(gate.check_reference(draft)))
             with self.assertRaises(FileExistsError): m.cuts(src, out)
 
 

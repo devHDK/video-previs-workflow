@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -13,23 +14,55 @@ BINARY = os.environ.get('BLENDER_BIN') or shutil.which('blender')
 if not BINARY and Path('/Applications/Blender.app/Contents/MacOS/Blender').is_file():
     BINARY = '/Applications/Blender.app/Contents/MacOS/Blender'
 
+def small_spec(root):
+    spec = json.loads((SKILL / 'assets/tracking-jump.json').read_text())
+    spec.update(width=96, height=128)
+    shot = spec['shots'][0]; shot['frames'] = 3
+    for item in shot['objects']:
+        item['keys'] = [dict(item['keys'][0], frame=1), dict(item['keys'][-1], frame=3)]
+        item.pop('ground_contact', None)
+    shot['camera']['keys'][-1]['frame'] = 3
+    source = root / 'scene.json'; source.write_text(json.dumps(spec))
+    return source
+
+
+def render(source, output, *flags):
+    return subprocess.run([BINARY, '--background', '--factory-startup', '--python-exit-code', '1',
+        '--python', str(SKILL / 'scripts/render_previs.py'), '--', str(source), str(output), *flags],
+        capture_output=True, text=True, timeout=240)
+
+
 @unittest.skipUnless(BINARY, 'Blender runtime unavailable; not a render pass')
 class BlenderRuntimeTests(unittest.TestCase):
+    def test_frames_and_size_render_only_requested_stills(self):
+        with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
+            root = Path(temp); output = root / 'result'
+            result = render(small_spec(root), output, '--frames', '2', '--size', '64x96')
+            self.assertEqual(result.returncode, 0, result.stdout[-4000:] + result.stderr[-4000:])
+            self.assertEqual(sorted(p.name for p in (output / 's01').glob('*.png')), ['review_0002.png'])
+            self.assertEqual(struct.unpack('>II', (output / 's01/review_0002.png').read_bytes()[16:24]), (64, 96))
+
+    def test_audit_only_writes_no_images(self):
+        with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
+            root = Path(temp); output = root / 'result'
+            result = render(small_spec(root), output, '--audit-only')
+            self.assertEqual(result.returncode, 0, result.stdout[-4000:] + result.stderr[-4000:])
+            self.assertTrue((output / 's01/audit.json').is_file())
+            self.assertEqual(list(output.rglob('*.png')) + list(output.rglob('*.blend')), [])
+
+    def test_bad_frame_leaves_no_output_dir(self):
+        with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
+            root = Path(temp); output = root / 'result'
+            result = render(small_spec(root), output, '--frames', '9')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('s01: frame 9 is outside 1..3', result.stdout + result.stderr)
+            self.assertFalse(output.exists())
+
     def test_tracking_review_outputs_and_saved_animation(self):
         with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
             root = Path(temp)
-            spec = json.loads((SKILL / 'assets/tracking-jump.json').read_text())
-            spec.update(width=96, height=128)
-            shot = spec['shots'][0]; shot['frames'] = 3
-            for item in shot['objects']:
-                item['keys'] = [dict(item['keys'][0], frame=1), dict(item['keys'][-1], frame=3)]
-                item.pop('ground_contact', None)
-            shot['camera']['keys'][-1]['frame'] = 3
-            source = root / 'scene.json'; source.write_text(json.dumps(spec))
             output = root / 'result'
-            result = subprocess.run([BINARY, '--background', '--factory-startup', '--python-exit-code', '1',
-                '--python', str(SKILL / 'scripts/render_previs.py'), '--', str(source), str(output), '--review-only'],
-                capture_output=True, text=True, timeout=240)
+            result = render(small_spec(root), output, '--review-only')
             self.assertEqual(result.returncode, 0, result.stdout[-4000:] + result.stderr[-4000:])
             folder = output / 's01'
             for name in ('scene.blend', 'audit.json', 'review_0001.png', 'review_0002.png', 'review_0003.png'):

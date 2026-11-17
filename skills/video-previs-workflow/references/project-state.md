@@ -24,13 +24,15 @@ Maintain these fields (JSON or equivalent structured text):
 
 - `project_id`, `revision`, `stage`, `updated_at`, `active_host`.
 - `output`: width, height, fps, total_frames, audio/subtitle requirements.
+- `generation_profile`: route, model, `max_duration_s`, `duration_step_s`, image_refs, video_refs, resolution, unlimited, evidence. Recorded before the story or reference is approved.
 - `story`: path, sha256, approval status, evidence and time (`approved_at`). Required before previs, unless `reference` is approved.
 - `reference`: the same fields for a reference breakdown (`reference-vNNN.json`) on the reference-led route.
 - `previs`: spec_path/hash, render_path/hash, approval status, approved revision, evidence and time.
-- `assets[]`: role_id, source, original_path/hash, working_path/hash, `sha256` (the working file bound to shots), version, approval status/evidence/time, shot_ids.
-- `shots[]`: id, frames, `required_events` (mandatory, nonempty), `object_roles` (every previs object id → role_id or `null`), `asset_bindings` (role_id, version, sha256), `keyframes[]` (kind `start`/`end`, path, sha256, approval), previs revision, selected output, stale reason, QA status.
+- `assets[]`: role_id, `kind` (`character`, `prop` or `set`), source, original_path/hash, working_path/hash, `sha256` (the working file bound to shots), version, approval status/evidence/time, shot_ids.
+- `shots[]`: id, frames, `required_events` (mandatory, nonempty), `object_roles` (every previs object id → role_id or `null`), `props` (each prop role → `origin`, `holder`, `exit`), `asset_bindings` (role_id, version, sha256), `keyframes[]` (kind `start`/`end`, or kind `reference` with `previs_frame` for a mid-take state image; path, sha256, approval), previs revision, selected output, stale reason, QA status.
+- `review_notes[]` on an asset or keyframe: `note`, `resolution` (`fixed` or `accepted`) and `evidence` (the new version, or the user's words). An approved record may not hold an open note.
 - `continuity[]`: role_id, `keyframe_sha256` (shot → hash of the approved start keyframe reviewed), approval, evidence. Required for every role used by two or more shots.
-- `budget`: currency or credit unit, approved scope, cap, max_attempts, `retry_reserve`, `max_shot_quote`, approval evidence, settled cost, reserved cost, attempts used. State whether quote includes image, voice, video, lip-sync, and paid retries.
+- `budget`: currency or credit unit, approved scope, cap, max_attempts, `retry_reserve`, `max_shot_quote`, approval evidence, settled cost, reserved cost, attempts used (paid submissions only) and `manual_takes` (zero-quote manual jobs, not limited). State whether quote includes image, voice, video, lip-sync, and paid retries.
 - `jobs[]`: local request ID, `route` (`mcp` default or `manual`), host, shot/asset target, `shots` for a sequence take (covered shot ids in order, beginning with its shot), tool/model, parameters, reference hashes, `start_frame_sha256`, `retry_of` for retries, quote with timestamp, reservation, submitted_at, provider_job_id, status, actual charge, output paths, error/recovery evidence.
 - `handoff`: blockers, next unpaid action, next paid action, unresolved jobs, unverified outputs.
 
@@ -51,5 +53,7 @@ Example: cap 100, settled 45, unknown job reservation 40 leaves 15 available. A 
 ## Single writer and handoff
 
 Only one agent/host may submit jobs for a project at a time. Before modifying state for submission, create a `submission.lock` directory atomically (`mkdir` without `exist_ok=True`), write owner/time/request ID, then reread current state. An existing lock requires inspecting its owner and pending jobs; do not remove it merely because it is old. On confirmed safe handoff, reconcile jobs and explicitly transfer ownership. Write state to a temporary file beside it and atomically replace it. Release the lock after the submission and state update are known; interruption leaves it for recovery.
+
+Do these steps with `state.py` (`lock`, `reserve`, `submit`, `settle`, `approve`, `unlock`; see local-tools.md) instead of editing the file by hand: it takes and releases the lock, keeps `reserved` and `settled` in step with the jobs and writes atomically. Hand edits remain for recovery. `gate.py` still only reads.
 
 These are orchestration instructions, not a payment firewall: bundled scripts do not submit jobs or enforce provider-side credit limits.

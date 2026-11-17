@@ -1,11 +1,16 @@
 """Sampled Blender geometry checks; not a generated-video quality score."""
 
-def framing_issues(points, margin=0):
+def framing_issues(points, margin=0, crop_ok=False):
     issues = []
     if any(z <= 0 for x, y, z in points): issues.append('behind_camera')
-    if any(x < margin or x > 1-margin or y < margin or y > 1-margin for x, y, z in points):
+    if not crop_ok and any(x < margin or x > 1-margin or y < margin or y > 1-margin for x, y, z in points):
         issues.append('outside_frame')
     return issues
+
+
+def same_group(a, b, groups):
+    """Proxies of one figure (head, face marker, mask) are not occluders of each other."""
+    return any(a in group and b in group for group in groups)
 
 
 def contact_issue(bottom, ground, tolerance, frame, windows):
@@ -42,12 +47,13 @@ def audit_scene(scene, shot, objects):
                 issues = []
                 if item['id'] in subjects:
                     projected = [world_to_camera_view(scene, camera, v) for v in corners]
-                    issues += framing_issues(projected, settings.get('margin', 0))
+                    issues += framing_issues(projected, settings.get('margin', 0), item['id'] in settings.get('crop_ok', []))
                     center = sum(corners, Vector()) / len(corners)
                     ray = center - camera.matrix_world.translation
                     if ray.length > 1e-6:
                         hit = scene.ray_cast(graph, camera.matrix_world.translation, ray.normalized(), distance=ray.length)
-                        if hit[0] and hit[4] is not None and hit[4].original != obj.original:
+                        if hit[0] and hit[4] is not None and hit[4].original != obj.original \
+                                and not same_group(item['id'], hit[4].original.get('role_id'), settings.get('groups', [])):
                             issues.append('center_occluded')
                 contact = contact_issue(min(p.z for p in corners), settings.get('ground_z', 0),
                                         settings.get('tolerance', .05), frame, item.get('ground_contact', []))

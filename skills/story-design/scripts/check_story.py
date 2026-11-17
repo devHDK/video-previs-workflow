@@ -7,6 +7,7 @@ from pathlib import Path
 # Structure id -> minimum pre-payoff beats with an active obstacle. Keep in sync with references/structures.md.
 STRUCTURES = {'obstacle_payoff': 2, 'cliffhanger': 1, 'relief': 0, 'reveal': 0, 'info_list': 0, 'custom': 0}
 SERVES = ('purpose', 'target_action')
+SETUP_FIELDS = ('premise', 'tone', 'avoid', 'lead', 'setting')  # required; `hook` is optional. Same in video-previs-workflow gate.py
 TOLERANCE = 1e-6
 
 
@@ -28,6 +29,8 @@ def check(story):
                         ('target_action.cue', action.get('cue')), ('structure.id', structure.get('id')),
                         ('structure.why', structure.get('why'))):
         if not text(value): errors.append(f'{name} is required')
+    setup = story.get('setup') if isinstance(story.get('setup'), dict) else {}
+    errors += [f'setup.{field} is required' for field in SETUP_FIELDS if not text(setup.get(field))]
     if text(structure.get('id')) and structure['id'] not in STRUCTURES:
         errors.append(f"structure.id must be one of: {', '.join(STRUCTURES)}")
 

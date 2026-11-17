@@ -100,6 +100,13 @@ def validate(spec):
         need(finite(audit.get('tolerance', .05)) and audit.get('tolerance', .05) >= 0, f'{sid}: invalid ground tolerance')
         subjects = audit.get('subjects', [])
         need(isinstance(subjects, list) and all(isinstance(x, str) and x in ids for x in subjects), f'{sid}: unknown audit subject')
+        known = lambda v: isinstance(v, list) and all(isinstance(x, str) and x in ids for x in v)
+        groups = audit.get('groups', [])
+        need(isinstance(groups, list) and all(known(g) for g in groups), f'{sid}: audit groups must be lists of object ids')
+        need(known(audit.get('crop_ok', [])), f'{sid}: audit crop_ok must list object ids')
+        review = shot.get('review_frames', [])
+        need(isinstance(review, list) and all(integer(f) and integer(n) and f <= n for f in review),
+             f'{sid}: review_frames must be integers within 1..frames')
         if not errors:
             from motion import camera_at
             for frame in range(1, n + 1):

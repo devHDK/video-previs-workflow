@@ -19,20 +19,26 @@ def sha(p):
     return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
 
+SETUP = {f: 'x' for f in ('premise', 'tone', 'avoid', 'lead', 'setting')}  # `hook` is optional, so the fixtures leave it out
+
+
 def ready_project(root: Path) -> dict:
     (root / 'story.json').write_text(json.dumps(
-        {'purpose': 'p', 'target_action': {'action': 'save'}, 'structure': {'id': 'relief'}}))
+        {'purpose': 'p', 'target_action': {'action': 'save'}, 'structure': {'id': 'relief'}, 'setup': SETUP}))
     (root / 'scene.json').write_text(json.dumps(
-        {'shots': [{'id': 's01', 'objects': [{'id': 'hero'}, {'id': 'slide'}, {'id': 'ground'}]}]}))
+        {'fps': 24, 'shots': [{'id': 's01', 'frames': 48, 'objects': [{'id': 'hero'}, {'id': 'slide'}, {'id': 'ground'}]}]}))
     for name in ('k.png', 'hero.png', 'slide.png'):
         (root / name).write_bytes(name.encode())
-    asset = lambda role: {'role_id': role, 'version': 'v001', 'sha256': sha(root / f'{role}.png'), 'approval': 'approved'}
+    asset = lambda role, kind: {'role_id': role, 'version': 'v001', 'sha256': sha(root / f'{role}.png'), 'approval': 'approved',
+                                'kind': kind}
     return {
         'story': {'path': 'story.json', 'sha256': sha(root / 'story.json'), 'approval': 'approved'},
         'previs': {'spec_path': 'scene.json', 'approval': 'approved'},
-        'assets': [asset('hero'), asset('slide')],
+        'generation_profile': {'route': 'manual', 'model': 'm', 'max_duration_s': 30, 'duration_step_s': 1},
+        'assets': [asset('hero', 'character'), asset('slide', 'prop')],
         'shots': [{'id': 's01', 'required_events': ['hero lands'],
                    'object_roles': {'hero': 'hero', 'slide': 'slide', 'ground': None},
+                   'props': {'slide': {'origin': 'stands in the yard from frame 1', 'holder': 'none', 'exit': 'stays'}},
                    'asset_bindings': [{'role_id': r, 'sha256': sha(root / f'{r}.png')} for r in ('hero', 'slide')],
                    'keyframes': [{'kind': 'start', 'path': 'k.png', 'sha256': sha(root / 'k.png'), 'approval': 'approved'}]}],
         'budget': {'cap': 100, 'settled': 0, 'reserved': 0, 'max_attempts': 5, 'attempts_used': 0,
@@ -62,7 +68,8 @@ class GateProjectTests(unittest.TestCase):
         e = self.errors()
         for msg in ('story: approved story design or reference breakdown required', 's01: required_events missing',
                     's01: object slide has no role decision (map to a role or null)',
-                    's01: approved start keyframe required', 'budget: retry_reserve must cover max_shot_quote'):
+                    's01: approved start keyframe required', 'budget: retry_reserve must cover max_shot_quote',
+                    'generation_profile: model, max_duration_s and duration_step_s are required'):
             self.assertIn(msg, e)
 
     def test_empty_state_reports_without_raising(self):
@@ -79,6 +86,61 @@ class GateProjectTests(unittest.TestCase):
         (self.root / 'story.json').write_text('{}')
         self.state['story']['sha256'] = sha(self.root / 'story.json')
         self.assertIn('story: purpose, target_action and structure are required', self.errors())
+
+    def test_story_setup_required(self):
+        data = json.loads((self.root / 'story.json').read_text()); data['setup']['tone'] = ' '
+        (self.root / 'story.json').write_text(json.dumps(data)); self.state['story']['sha256'] = sha(self.root / 'story.json')
+        self.assertIn('story: setup needs premise, tone, avoid, lead and setting', self.errors())
+
+    def test_unresolved_asset_note_blocks(self):
+        self.state['assets'][0]['review_notes'] = [{'note': 'masks read as face paint'}]
+        self.assertIn('asset hero v001: unresolved review note', self.errors())
+
+    def test_unresolved_keyframe_note_blocks(self):
+        self.shot['keyframes'][0]['review_notes'] = [{'note': 'n', 'resolution': 'accepted', 'evidence': ''}]
+        self.assertIn('s01: keyframe k.png: unresolved review note', self.errors())
+
+    def test_resolved_notes_pass(self):
+        self.state['assets'][0]['review_notes'] = [{'note': 'n', 'resolution': 'accepted', 'evidence': 'User: fine as is'}]
+        self.shot['keyframes'][0]['review_notes'] = [{'note': 'n', 'resolution': 'fixed', 'evidence': 'v002'}]
+        self.assertEqual(self.errors(), [])
+
+    def test_malformed_notes_count_as_unresolved(self):
+        self.state['assets'][0]['review_notes'] = 'later'
+        self.assertIn('asset hero v001: unresolved review note', self.errors())
+
+    def test_superseded_asset_notes_ignored(self):
+        self.state['assets'].append({'role_id': 'hero', 'version': 'v000', 'sha256': 'old', 'approval': 'superseded',
+                                     'review_notes': [{'note': 'n'}]})
+        self.assertEqual(self.errors(), [])
+
+    def test_asset_kind_required(self):
+        self.state['assets'][0]['kind'] = 'hero'
+        self.assertIn('asset hero v001: kind must be character, prop or set', self.errors())
+
+    def test_prop_needs_origin_holder_exit(self):
+        self.shot['props']['slide']['origin'] = ''
+        self.assertIn('s01: prop slide needs origin, holder and exit', self.errors())
+
+    def test_props_wrong_type_reported_not_raised(self):
+        self.shot['props'] = ['slide']
+        self.assertIn('s01: prop slide needs origin, holder and exit', self.errors())
+
+    def test_character_needs_no_props_entry(self):
+        self.assertNotIn('hero', self.shot['props'])
+        self.assertEqual(self.errors(), [])
+
+    def test_generation_profile_required(self):
+        del self.state['generation_profile']
+        self.assertIn('generation_profile: model, max_duration_s and duration_step_s are required', self.errors())
+
+    def test_generation_profile_wrong_type_reported_not_raised(self):
+        self.state['generation_profile'] = ['Seedance']
+        self.assertIn('generation_profile: model, max_duration_s and duration_step_s are required', self.errors())
+
+    def test_shot_longer_than_model_limit(self):
+        self.state['generation_profile']['max_duration_s'] = 1.5
+        self.assertIn('s01: 2.0 s exceeds generation_profile.max_duration_s 1.5', self.errors())
 
     def test_unmapped_object_reported(self):
         del self.shot['object_roles']['slide']
@@ -160,15 +222,17 @@ def reference_project(root: Path) -> dict:
         {'id': 's02', 'frames': 48, 'objects': []}]}))
     write_reference(root, [
         {'id': 's01', 'start': 0, 'end': 1.5, 'camera': 'MS eye level, static', 'action': 'hero slides in',
-         'events': [{'t': 1.0, 'event': 'hero lands'}]},
-        {'id': 's02', 'start': 1.5, 'end': 3.5, 'camera': 'CU push in', 'action': 'hero waves'}])
+         'events': [{'t': 1.0, 'event': 'hero lands'}],
+         'camera_evidence': [{'t': 0, 'subject_px': 100}, {'t': 1.0, 'subject_px': 60}]},
+        {'id': 's02', 'start': 1.5, 'end': 3.5, 'camera': 'CU push in', 'action': 'hero waves',
+         'camera_evidence': [{'t': 1.5, 'background_px': 40}, {'t': 3.0, 'background_px': 40}]}])
     state['reference'] = {'path': 'reference.json', 'sha256': sha(root / 'reference.json'), 'approval': 'approved'}
     return state
 
 
 def write_reference(root, shots):
     (root / 'reference.json').write_text(json.dumps(
-        {'version': 1, 'source': {'path': 'inputs/reference.mp4', 'sha256': 'abc'}, 'shots': shots}))
+        {'version': 1, 'source': {'path': 'inputs/reference.mp4', 'sha256': 'abc'}, 'setup': SETUP, 'shots': shots}))
 
 
 class GateReferenceTests(unittest.TestCase):
@@ -198,6 +262,45 @@ class GateReferenceTests(unittest.TestCase):
         job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
         self.assertEqual(self.g.check_submission(self.state, job, self.root), [])
 
+    def test_reference_setup_required(self):
+        ref = json.loads((self.root / 'reference.json').read_text()); ref['setup'] = ['funny']
+        (self.root / 'reference.json').write_text(json.dumps(ref)); self.state['reference']['sha256'] = sha(self.root / 'reference.json')
+        self.assertIn('reference: setup needs premise, tone, avoid, lead and setting', self.errors())
+
+    EVIDENCE = 'reference s01: camera_evidence needs 2+ samples with t and subject_px or background_px'
+
+    def test_camera_evidence_required(self):
+        shots = self.shots(); shots[0]['camera_evidence'] = [{'t': 0, 'subject_px': 100}]; self.rewrite(shots)
+        self.assertIn(self.EVIDENCE, self.errors())
+
+    def test_camera_evidence_wrong_type_reported_not_raised(self):
+        shots = self.shots(); shots[0]['camera_evidence'] = [{'t': 'a'}, 'x']; self.rewrite(shots)
+        self.assertIn(self.EVIDENCE, self.errors())
+
+    def test_split_take_that_fits_must_merge(self):
+        shots = self.shots(); shots[1].update(continues_previous=True, split_reason='web limit'); self.rewrite(shots)
+        self.assertIn('reference s01: take of 3.5 s fits max_duration_s 30; merge the split shots', self.errors())
+
+    def test_split_take_over_limit_passes_with_reason(self):
+        self.state['generation_profile']['max_duration_s'] = 3
+        shots = self.shots(); shots[1].update(continues_previous=True, split_reason='3.5 s take, 3 s limit'); self.rewrite(shots)
+        self.assertEqual(self.errors(), [])
+
+    def test_split_needs_reason(self):
+        self.state['generation_profile']['max_duration_s'] = 3
+        shots = self.shots(); shots[1]['continues_previous'] = True; self.rewrite(shots)
+        self.assertIn('reference s02: split_reason is required when a shot continues the previous one', self.errors())
+
+    def test_split_take_cannot_be_checked_without_a_limit(self):
+        shots = self.shots(); shots[1].update(continues_previous=True, split_reason='web limit')
+        ref = {'version': 1, 'source': {'path': 'a', 'sha256': 'b'}, 'setup': SETUP, 'shots': shots}
+        self.assertEqual(self.g.check_reference(ref),
+                         ['reference: a split take needs --max-duration (generation_profile.max_duration_s) to be checked'])
+
+    def test_first_shot_cannot_continue(self):
+        shots = self.shots(); shots[0]['continues_previous'] = True; self.rewrite(shots)
+        self.assertIn('reference s01: continues_previous on the first shot', self.errors())
+
     def test_unapproved_reference_is_not_enough(self):
         self.state['reference']['approval'] = 'pending'
         self.assertIn('story: approved story design or reference breakdown required', self.errors())
@@ -215,6 +318,7 @@ class GateReferenceTests(unittest.TestCase):
     def test_cut_boundaries_round_without_drift(self):
         shots = self.shots()
         shots[0]['end'] = shots[1]['start'] = 1.5333  # 30 fps cut: 36.8 -> boundary 37
+        shots[1]['camera_evidence'][0]['t'] = 1.6  # the fixture sample at 1.5 s now falls before the moved cut
         self.rewrite(shots)
         spec = json.loads((self.root / 'scene.json').read_text())
         spec['shots'][0]['frames'], spec['shots'][1]['frames'] = 37, 47
@@ -228,6 +332,7 @@ class GateReferenceTests(unittest.TestCase):
 
     def test_recorded_decision_exempts_timing(self):
         shots = self.shots() + [{'id': 's03', 'start': 3.5, 'end': 4.0, 'camera': 'WS', 'action': 'exit',
+                                 'camera_evidence': [{'t': 3.5, 'subject_px': 20}, {'t': 3.9, 'subject_px': 20}],
                                  'decision': 'dropped: user approved ending on s02'}]
         self.rewrite(shots)
         self.assertEqual(self.errors(), [])
@@ -334,6 +439,15 @@ class GateSubmissionTests(unittest.TestCase):
         self.job['start_frame_sha256'] = 'other'
         self.assertIn('s01: job start frame is not the approved keyframe', self.errors())
 
+    def test_submission_blocked_by_unresolved_note(self):
+        self.state['assets'][0]['review_notes'] = [{'note': 'n'}]
+        self.assertIn('asset hero v001: unresolved review note', self.errors())
+
+    def test_manual_zero_quote_job_ignores_attempt_limit(self):
+        self.budget.update(attempts_used=5, max_shot_quote=0, retry_reserve=0)
+        self.job.update(quote=0, route='manual')
+        self.assertEqual(self.errors(), [])
+
     def test_attempt_limit(self):
         self.budget['attempts_used'] = 5
         self.assertIn('budget: attempt limit reached', self.errors())
@@ -356,8 +470,8 @@ class GateContinuityTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.g = load('gate')
         self.state = ready_project(self.root)
-        (self.root / 'scene.json').write_text(json.dumps({'shots': [
-            {'id': s, 'objects': [{'id': 'hero'}, {'id': 'slide'}, {'id': 'ground'}]} for s in ('s01', 's02')]}))
+        (self.root / 'scene.json').write_text(json.dumps({'fps': 24, 'shots': [
+            {'id': s, 'frames': 48, 'objects': [{'id': 'hero'}, {'id': 'slide'}, {'id': 'ground'}]} for s in ('s01', 's02')]}))
         (self.root / 'k2.png').write_bytes(b'k2')
         s02 = json.loads(json.dumps(self.state['shots'][0])); s02['id'] = 's02'
         s02['keyframes'] = [{'kind': 'start', 'path': 'k2.png', 'sha256': sha(self.root / 'k2.png'), 'approval': 'approved'}]
@@ -436,6 +550,10 @@ class GateSequenceJobTests(unittest.TestCase):
     def test_sequence_job_checks_every_covered_shot(self):
         self.state['shots'][1]['required_events'] = []
         self.assertIn('s02: required_events missing', self.sub())
+
+    def test_sequence_take_must_fit_model_limit(self):
+        self.state['generation_profile']['max_duration_s'] = 3
+        self.assertIn('job: take of 4.0 s exceeds generation_profile.max_duration_s 3', self.sub())
 
     def test_sequence_job_unknown_shot(self):
         self.job['shots'] = ['s01', 's09']
