@@ -91,6 +91,6 @@ python3 skills/video-previs-workflow/scripts/validate_spec.py skills/video-previ
 python3 skills/story-design/scripts/check_story.py skills/story-design/assets/example-story.json
 ```
 
-설계 문서는 `docs/superpowers/specs`, 구현 계획은 `docs/superpowers/plans`, 실제 실행 결과와 검증하지 않은 범위는 [VALIDATION.md](VALIDATION.md)에 기록합니다.
+실제 실행 결과와 검증하지 않은 범위는 [VALIDATION.md](VALIDATION.md)에 기록합니다.
 
 유료 제작 전에 작업별 범위·비용 상한·최대 시도 횟수를 승인합니다. 스킬을 설치하거나 실행하겠다는 말만으로 생성 크레딧 사용을 승인한 것으로 처리하지 않습니다.

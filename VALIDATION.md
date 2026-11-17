@@ -63,7 +63,7 @@ The user-installed Codex skill has been discovered in a live turn. Local `ffmpeg
 
 ## 2026-11-12 story design and fidelity gates
 
-Trigger: review of the first generated scalp-immigration-ep01 edit (previs v004 vs selected takes, five relative points per shot) and client feedback that the story lacked conflict. Spec: `docs/superpowers/specs/2026-11-12-story-design-and-fidelity-gates-design.md`.
+Trigger: review of the first generated scalp-immigration-ep01 edit (previs v004 vs selected takes, five relative points per shot) and client feedback that the story lacked conflict.
 
 - New `story-design` skill with `check_story.py`; `video-previs-workflow` gained `gate.py` (`ready`, `submit`), clip `start`/`speed`/`dialogue` limits in `media.py assemble`, and `media.py pair` contact sheets. Every new test was run red before its implementation.
 - Suite: 63 tests pass on this host (Python 3.11.7, Blender 5.3.0, local FFmpeg), including the Blender runtime test. `media.py pair` was run on real ep01 clips (s01, s04); the s04 take has audio longer than video and its last sample is still filled.
