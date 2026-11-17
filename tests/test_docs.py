@@ -40,7 +40,9 @@ class DocTests(unittest.TestCase):
         for name in ('generation_profile', 'max_duration_s', 'duration_step_s', 'manual_takes', 'review_notes', 'props',
                      'setup', 'camera_evidence', 'continues_previous', 'split_reason', 'review_frames', 'crop_ok',
                      '--frames', '--size', '--shot', '--audit-only', '--times', 'state.py', 'blocking.py', 'previs/d01',
-                     'kind `reference`', '--status cancelled'):
+                     'kind `reference`', '--status cancelled', 'group_motion', 'spread_s', 'measured_s', 'unlisted_motion',
+                     '`travel`', 'event_results', 'gate.py qa', 'media.py dupes', 'media.py spread', 'media.py reframe',
+                     'state.py asset', 'state.py keyframe', 'state.py note', 'state.py bind'):
             self.assertTrue(name in refs, f'{name} is not documented in references/')
 
     def test_skill_md_stays_compact(self):

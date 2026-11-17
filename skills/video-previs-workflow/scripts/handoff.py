@@ -46,6 +46,8 @@ def pack(job, root, out_dir):
              'Generate this by hand in the provider web app. Do not automate the web app.', '', '## Settings', '',
              *[f'- {k}: {v}' for k, v in (job.get('settings') or {}).items()], '', '## Inputs (upload in this order)', '',
              '| file | slot | purpose |', '|---|---|---|', *rows, '', '## Prompt', '', '```text', job['prompt'], '```', '',
+             'After pasting, check that every reference tag in the prompt links to its uploaded file: a tag left as plain text '
+             'means the model never sees that input. Note how many images and videos the app accepted.', '',
              '## Result', '', f"Expected: {output.get('kind', 'file')}. {output.get('notes', '')}".rstrip(),
              '', 'Put exactly one result file in `output/`.', '']
     (out_dir / 'request.md').write_text('\n'.join(lines))

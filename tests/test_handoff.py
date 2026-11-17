@@ -54,6 +54,11 @@ class PackTests(unittest.TestCase):
                   '```text\nseated traveler asleep\n```', 'output/'):
             self.assertIn(s, text)
 
+    def test_request_asks_to_check_reference_links_and_counts(self):
+        self.h.pack(self.job, self.root, self.out)
+        text = (self.out / 'request.md').read_text()
+        self.assertIn('links to its uploaded file', text); self.assertIn('how many images and videos', text)
+
     def test_unicode_slot_slug(self):
         self.assertEqual(self.h.slug('시작 프레임 / 9:16'), '시작-프레임-9-16')
         self.assertEqual(self.h.slug('///'), 'input')

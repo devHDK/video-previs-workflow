@@ -10,7 +10,7 @@ Create timed SRT subtitles and proofread words/timing. The assembler supports se
 
 ## QA evidence
 
-For each shot build `media.py pair PREVIS TAKE sheet.jpg` (previs row over take row at matching relative times), then compare previs, keyframe and selected take at cut boundaries and required-event windows. Inspect actual frame images and playback when available; expand sampling around discontinuities. Record a pass/fail table per shot, with frame numbers/timestamps and findings for:
+For each shot build `media.py pair PREVIS TAKE sheet.jpg` (previs row over take row at matching relative times), then compare previs, keyframe and selected take at cut boundaries and required-event windows. Inspect actual frame images and playback when available; expand sampling around discontinuities. Write one claim per required event ("all start at once" and "each slightly off the beat" are two events), record each result in the shot's `event_results` (`{event: {result: pass|fail|accepted, evidence}}`) and run `gate.py qa state.json` before calling a take done. Record a pass/fail table per shot, with frame numbers/timestamps and findings for:
 
 - Composition against keyframe and previs: shot size, camera height, start and end framing.
 - Every entry in the shot's `required_events`.
@@ -18,7 +18,9 @@ For each shot build `media.py pair PREVIS TAKE sheet.jpg` (previs row over take 
 - Boundaries: for consecutive shots that share a set role, extract the last frame of one take and the first frame of the next (`ffmpeg -sseof -0.1 -i A.mp4 -update 1 a_last.png` and `ffmpeg -i B.mp4 -frames:v 1 b_first.png`; `media.py extract` samples at an interval and can miss the final second) and compare floor, light, set dressing and character positions; report differences as defects.
 - Identity, silhouette/clothes, props, entity counts and scale, and background continuity.
 - Event order, contact/occlusion, motion direction, camera movement and entry/exit state.
-- Timing drift, frozen/padded frames and unintended cuts.
+- Timing drift, frozen/padded frames and unintended cuts. Run `media.py dupes TAKE` on every take: web exports can repeat a frame every second; `--fix OUT` replaces each with the average of its neighbours (a one-frame ghost on fast motion) and the original take is kept.
+- Groups: run `media.py spread` on the take over the same window and grid proportions as the reference and store it as `group_motion.<role>.measured_s`. Overall beat timing does not show whether members move together.
+- Travel: for every stretch where a figure changes place, lay stills 0.2 s apart from the take beside the reference; added sidesteps and people appearing in the way show here and nowhere else.
 - Voice intelligibility, effects, sync and subtitle text/placement.
 
 On the reference-led route, also run `media.py compare` on the reference and the final edit, and report each reference event's frame offset in the final.
