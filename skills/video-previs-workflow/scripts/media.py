@@ -210,6 +210,127 @@ def cuts(source, output_dir, threshold=0.3):
     return draft
 
 
+DUP, MOVING = 0.6, 1.0  # mean abs luma difference to the previous frame: a repeat sits far below the motion around it
+
+
+def repeated_frames(diffs):
+    """Frames that repeat the one before while the picture is moving. diffs[i] = frame i against frame i-1.
+    The last frame is skipped: there is no next frame to rebuild it from."""
+    return [i for i in range(2, len(diffs) - 1) if diffs[i] < DUP and diffs[i - 1] > MOVING]
+
+
+def frame_diffs(source):
+    out = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(source), '-an', '-vf',
+                          'tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-',
+                          '-f', 'null', '-'], capture_output=True, text=True, check=True).stdout
+    return [0.0] + [float(v) for v in re.findall(r'YAVG=([0-9.]+)', out)]
+
+
+def dupes(source, fix=None):
+    """Find frames a web export repeated (often one per second); with `fix`, write a copy where each is replaced
+    by the average of its neighbours. Returns {'frames', 'repeated'}."""
+    if fix is not None: fix = fresh_output(fix)
+    diffs = frame_diffs(source)
+    result = {'frames': len(diffs), 'repeated': repeated_frames(diffs)}
+    if fix is None or not result['repeated']:
+        if fix is not None: run(['ffmpeg', '-v', 'error', '-n', '-i', source, '-an', '-c:v', 'copy', fix])
+        return result
+    video = next(s for s in probe(source)['streams'] if s['codec_type'] == 'video')
+    width, height, size = video['width'], video['height'], video['width'] * video['height'] * 3 // 2
+    raw = ['-f', 'rawvideo', '-pix_fmt', 'yuv420p']
+    dec = subprocess.Popen(['ffmpeg', '-v', 'error', '-i', str(source), *raw, '-'], stdout=subprocess.PIPE)
+    enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-n', *raw, '-s', f'{width}x{height}', '-r', video['r_frame_rate'], '-i', '-',
+                            '-c:v', 'libx264', '-crf', '14', '-pix_fmt', 'yuv420p', str(fix)], stdin=subprocess.PIPE)
+    # ponytail: a plain average ghosts for one frame on fast motion; use motion interpolation if that shows on review
+    bad, prev, cur, i = set(result['repeated']), None, None, -1
+    while True:
+        nxt = dec.stdout.read(size)
+        if cur is not None:
+            if i in bad and len(nxt) == size: cur = bytes((a + b) >> 1 for a, b in zip(prev, nxt))
+            enc.stdin.write(cur)
+        if len(nxt) != size: break
+        prev, cur, i = cur, nxt, i + 1
+    enc.stdin.close()
+    if dec.wait() or enc.wait(): raise RuntimeError('ffmpeg failed while rewriting frames; inspect the output')
+    return result
+
+
+def _percentile(values, q):
+    values = sorted(values); k = (len(values) - 1) * q / 100; lo = int(k)
+    return values[lo] + (values[min(lo + 1, len(values) - 1)] - values[lo]) * (k - lo)
+
+
+def _crossings(series, fps):
+    """(seconds, rising) where a series crosses the midpoint of its own range, and that range."""
+    lo, hi = _percentile(series, 5), _percentile(series, 95); mid = (lo + hi) / 2
+    return [((i + (mid - a) / (b - a)) / fps, b > a) for i, (a, b) in enumerate(zip(series, series[1:]))
+            if (a - mid) * (b - mid) < 0], hi - lo
+
+
+def spread_of(frames, fps):
+    """How far apart the members of a group change state. frames: one row of cell brightness per frame, a cell being
+    about one member. Each cell's crossing is compared with the whole picture's crossing for the same beat.
+    spread_s is half the 10th-90th percentile width: 0.25 reads as 'each up to a quarter second early or late'."""
+    cells = [[sum(col[max(0, i - 1):i + 2]) / len(col[max(0, i - 1):i + 2]) for i in range(len(col))] for col in zip(*frames)]
+    beats, _ = _crossings([sum(row) / len(row) for row in zip(*cells)], fps)
+    if not beats: raise ValueError('no state change found in this window')
+    ranges = sorted(_crossings(c, fps)[1] for c in cells)
+    floor = 0.4 * ranges[len(ranges) // 2]  # cells that barely change hold someone standing still or background
+    offsets, used = [], 0
+    for cell in cells:
+        found, amount = _crossings(cell, fps)
+        if amount <= floor: continue
+        used += 1
+        for t, rising in beats:
+            near = [c - t for c, r in found if r == rising and abs(c - t) < 0.6]
+            if near: offsets.append(min(near, key=abs))
+    if not offsets: raise ValueError('no cell follows the beats in this window')
+    p10, p90 = _percentile(offsets, 10), _percentile(offsets, 90)
+    return {'beats': len(beats), 'cells': used, 'spread_s': round((p90 - p10) / 2, 3), 'p10_s': round(p10, 3), 'p90_s': round(p90, 3)}
+
+
+def spread(source, start, end, grid, crop=None):
+    """spread_of for a clip between two times; grid = (columns, rows) sized so one cell holds about one member.
+    crop is an ffmpeg crop expression (w:h:x:y) for the part of the frame the group occupies."""
+    columns, rows = grid
+    video = next(s for s in probe(source)['streams'] if s['codec_type'] == 'video')
+    num, den = video['r_frame_rate'].split('/')
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{start:.3f}', '-t', f'{end - start:.3f}', '-i', str(source), '-an', '-vf',
+                          (f'crop={crop},' if crop else '') + f'scale={columns}:{rows}:flags=area,format=gray',
+                          '-f', 'rawvideo', '-'], capture_output=True, check=True).stdout
+    n = columns * rows
+    return spread_of([list(raw[i:i + n]) for i in range(0, len(raw) - n + 1, n)], int(num) / int(den))
+
+
+def parse_centres(text):
+    centres = [tuple(float(v) for v in item.split(':')) for item in text.split(',')]
+    if any(len(c) != 2 for c in centres) or any(b[0] <= a[0] for a, b in zip(centres, centres[1:])):
+        raise ValueError('centres are t:x pairs with increasing t, e.g. 0:780,3.04:1178')
+    return centres
+
+
+def reframe_filter(centres, crop_width, size, source_size):
+    """Crop a moving window out of a wider source and pad it to the target aspect, so a reference shot in another
+    aspect ratio can sit beside the previs at the same scale. centres: [(seconds, x of the window centre)]."""
+    (width, height), (source_width, source_height) = size, source_size
+    if not centres: raise ValueError('at least one centre is required')
+    if crop_width > source_width: raise ValueError('crop is wider than the source')
+    padded = int(round(crop_width * height / width / 2)) * 2
+    if padded < source_height: raise ValueError('target is wider than the crop; choose a wider crop')
+    expr = f'{centres[-1][1]:g}'
+    for (ta, a), (tb, b) in reversed(list(zip(centres, centres[1:]))):
+        expr = f'if(lt(t\\,{tb:g})\\,{a:g}+({b:g}-{a:g})*(t-{ta:g})/{tb - ta:g}\\,{expr})'
+    x = f'min(max({expr}-{crop_width / 2:g}\\,0)\\,{source_width - crop_width:g})'
+    return f'crop={crop_width}:{source_height}:{x}:0,pad={crop_width}:{padded}:0:(oh-ih)/2,scale={width}:{height},setsar=1'
+
+
+def reframe(source, output, size, crop_width, centres, fps):
+    video = next(s for s in probe(source)['streams'] if s['codec_type'] == 'video')
+    vf = reframe_filter(centres, crop_width, size, (video['width'], video['height']))
+    run(['ffmpeg', '-v', 'error', '-n', '-i', source, '-an', '-vf', vf, '-r', str(fps), '-c:v', 'libx264', '-crf', '18',
+         '-pix_fmt', 'yuv420p', fresh_output(output)])
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='action', required=True)
@@ -224,8 +345,22 @@ def main():
     q = sub.add_parser('continuity', help='keyframes per role shared by 2+ shots'); q.add_argument('state'); q.add_argument('output')
     q = sub.add_parser('cuts', help='draft reference breakdown from detected cuts'); q.add_argument('input')
     q.add_argument('output_dir'); q.add_argument('--threshold', type=float, default=0.3)
+    q = sub.add_parser('dupes', help='find frames repeated by an export; --fix writes a repaired copy'); q.add_argument('input'); q.add_argument('--fix')
+    q = sub.add_parser('spread', help='how far apart the members of a group change state'); q.add_argument('input')
+    q.add_argument('--start', type=float, required=True); q.add_argument('--end', type=float, required=True)
+    q.add_argument('--grid', required=True, help='COLUMNSxROWS, about one group member per cell'); q.add_argument('--crop', help='w:h:x:y')
+    q = sub.add_parser('reframe', help='crop a reference to the delivery aspect for comparison'); q.add_argument('input'); q.add_argument('output')
+    q.add_argument('--size', required=True, help='WxH of the result'); q.add_argument('--crop-width', type=int, required=True)
+    q.add_argument('--centres', required=True, help='t:x pairs, the window centre over time'); q.add_argument('--fps', type=int, required=True)
     a = p.parse_args()
     if a.action == 'probe': print(json.dumps(probe(a.input), indent=2))
+    elif a.action == 'dupes':
+        result = dupes(a.input, a.fix); print(json.dumps(result))
+        if result['repeated'] and not a.fix: raise SystemExit(1)
+    elif a.action == 'spread':
+        print(json.dumps(spread(a.input, a.start, a.end, tuple(int(v) for v in a.grid.split('x')), a.crop)))
+    elif a.action == 'reframe':
+        reframe(a.input, a.output, tuple(int(v) for v in a.size.split('x')), a.crop_width, parse_centres(a.centres), a.fps)
     elif a.action == 'cuts': print(json.dumps(cuts(a.input, a.output_dir, a.threshold), indent=2))
     elif a.action == 'continuity': print(json.dumps(continuity(a.state, a.output), indent=2))
     elif a.action == 'pair':
