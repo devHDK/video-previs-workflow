@@ -108,3 +108,68 @@ class StateTests(unittest.TestCase):
         self.assertEqual((done.returncode, done.stdout.strip()), (0, 'OK'))   # no lock, nothing active: nothing to do
 
 if __name__ == '__main__': unittest.main()
+
+
+class RecordTests(unittest.TestCase):
+    """Asset, keyframe and review-note records written by state.py instead of by hand."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.root = Path(self.tmp.name)
+        self.m = module('state'); self.path = self.root / 'state.json'
+        for name in ('hero-v001.png', 'hero-v002.png', 'k1.png', 'k2.png', 'mid.png'): (self.root / name).write_bytes(name.encode())
+        self.path.write_text(json.dumps({'assets': [], 'shots': [{'id': 's01', 'object_roles': {'hero': 'hero', 'floor': None}}]}))
+
+    def tearDown(self): self.tmp.cleanup()
+    def state(self): return json.loads(self.path.read_text())
+    def sha(self, name): return hashlib.sha256((self.root / name).read_bytes()).hexdigest()
+
+    def test_asset_record_is_pending_with_hash(self):
+        self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png')
+        a = self.state()['assets'][0]
+        self.assertEqual((a['role_id'], a['version'], a['kind'], a['approval'], a['sha256'], a['working_path']),
+                         ('hero', 'v001', 'character', 'pending', self.sha('hero-v001.png'), 'hero-v001.png'))
+
+    def test_asset_rejects_bad_kind_missing_file_and_duplicate(self):
+        with self.assertRaisesRegex(ValueError, 'kind'): self.m.asset(self.path, 'hero@v001', 'person', 'hero-v001.png')
+        with self.assertRaisesRegex(ValueError, 'not found'): self.m.asset(self.path, 'hero@v001', 'character', 'gone.png')
+        self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png')
+        with self.assertRaisesRegex(ValueError, 'exists'): self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png')
+
+    def test_approving_a_new_version_supersedes_the_old_one(self):
+        for v in ('v001', 'v002'):
+            self.m.asset(self.path, f'hero@{v}', 'character', f'hero-{v}.png'); self.m.approve(self.path, 'asset', f'hero@{v}', 'ok')
+        self.assertEqual([a['approval'] for a in self.state()['assets']], ['superseded', 'approved'])
+
+    def test_keyframe_record_and_start_supersede(self):
+        self.m.keyframe(self.path, 's01', 'k1.png', 'start', 1); self.m.approve(self.path, 'keyframe', 'k1.png', 'ok')
+        self.m.keyframe(self.path, 's01', 'mid.png', 'reference', 120); self.m.approve(self.path, 'keyframe', 'mid.png', 'ok')
+        self.m.keyframe(self.path, 's01', 'k2.png', 'start', 1); self.m.approve(self.path, 'keyframe', 'k2.png', 'ok')
+        keys = {k['path']: k for k in self.state()['shots'][0]['keyframes']}
+        self.assertEqual((keys['k1.png']['approval'], keys['mid.png']['approval'], keys['k2.png']['approval']),
+                         ('superseded', 'approved', 'approved'))
+        self.assertEqual((keys['mid.png']['previs_frame'], keys['k2.png']['sha256']), (120, self.sha('k2.png')))
+
+    def test_keyframe_rejects_unknown_shot_and_kind(self):
+        with self.assertRaisesRegex(ValueError, 'unknown shot'): self.m.keyframe(self.path, 's09', 'k1.png', 'start', 1)
+        with self.assertRaisesRegex(ValueError, 'kind'): self.m.keyframe(self.path, 's01', 'k1.png', 'middle', 1)
+
+    def test_note_blocks_approval_until_resolved(self):
+        self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png')
+        self.m.note(self.path, 'asset', 'hero@v001', note='cap is on')
+        with self.assertRaisesRegex(ValueError, 'unresolved'): self.m.approve(self.path, 'asset', 'hero@v001', 'ok')
+        self.m.note(self.path, 'asset', 'hero@v001', resolve='accepted', evidence='User: "fine"')
+        self.m.approve(self.path, 'asset', 'hero@v001', 'ok')
+        self.assertEqual(self.state()['assets'][0]['review_notes'], [{'note': 'cap is on', 'resolution': 'accepted', 'evidence': 'User: "fine"'}])
+
+    def test_note_needs_text_or_a_resolution_with_evidence(self):
+        self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png')
+        with self.assertRaisesRegex(ValueError, 'note'): self.m.note(self.path, 'asset', 'hero@v001')
+        with self.assertRaisesRegex(ValueError, 'evidence'): self.m.note(self.path, 'asset', 'hero@v001', resolve='fixed')
+
+    def test_bind_ties_approved_assets_to_shots_by_role(self):
+        self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png'); self.m.approve(self.path, 'asset', 'hero@v001', 'ok')
+        self.m.bind(self.path)
+        self.assertEqual(self.state()['shots'][0]['asset_bindings'],
+                         [{'role_id': 'hero', 'version': 'v001', 'sha256': self.sha('hero-v001.png')}])
+
+    def test_bind_names_roles_without_an_approved_asset(self):
+        with self.assertRaisesRegex(ValueError, 'hero'): self.m.bind(self.path)

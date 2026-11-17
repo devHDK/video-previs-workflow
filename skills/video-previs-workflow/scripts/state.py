@@ -132,7 +132,72 @@ def _record(state, kind, ident):
 def approve(state_path, kind, ident, evidence):
     state = _load(state_path); record = _record(state, kind, ident)
     if unresolved_notes(record): raise ValueError('unresolved review note')  # a defect is fixed or accepted first
+    for older in _rivals(state, kind, record):  # one approved version per role, one approved start frame per shot
+        if older is not record and older.get('approval') == 'approved': older['approval'] = 'superseded'
     record.update(approval='approved', evidence=evidence, approved_at=_now())
+    _save(state_path, state)
+
+
+def _rivals(state, kind, record):
+    if kind == 'asset': return [a for a in state.get('assets') or [] if isinstance(a, dict) and a.get('role_id') == record.get('role_id')]
+    if kind == 'keyframe' and record.get('kind') == 'start':
+        return [k for s in state.get('shots') or [] if isinstance(s, dict) and record in (s.get('keyframes') or [])
+                for k in s['keyframes'] if isinstance(k, dict) and k.get('kind') == 'start']
+    return []
+
+
+def _hashed(state_path, path):
+    file = Path(state_path).resolve().parent / path
+    if not file.is_file(): raise ValueError(f'file not found: {path}')
+    return hashlib.sha256(file.read_bytes()).hexdigest()
+
+
+def asset(state_path, ident, kind, path):
+    """Add a pending asset record `role@version` with the hash of its file."""
+    role, _, version = ident.partition('@')
+    if not (role and version): raise ValueError('asset is named role@version')
+    if kind not in ('character', 'prop', 'set'): raise ValueError('kind must be character, prop or set')
+    digest, state = _hashed(state_path, path), _load(state_path)
+    assets = state.setdefault('assets', [])
+    if any(isinstance(a, dict) and (a.get('role_id'), a.get('version')) == (role, version) for a in assets): raise ValueError('asset exists')
+    assets.append({'role_id': role, 'version': version, 'kind': kind, 'source': 'generated', 'original_path': str(path),
+                   'original_sha256': digest, 'working_path': str(path), 'sha256': digest, 'approval': 'pending', 'review_notes': []})
+    _save(state_path, state)
+
+
+def keyframe(state_path, shot_id, path, kind, previs_frame):
+    """Add a pending keyframe to a shot: kind start/end, or reference for a mid-take state image."""
+    if kind not in ('start', 'end', 'reference'): raise ValueError('kind must be start, end or reference')
+    digest, state = _hashed(state_path, path), _load(state_path)
+    shot = next((s for s in state.get('shots') or [] if isinstance(s, dict) and s.get('id') == shot_id), None)
+    if shot is None: raise ValueError('unknown shot')
+    keys = shot.setdefault('keyframes', [])
+    if any(isinstance(k, dict) and k.get('path') == str(path) for k in keys): raise ValueError('keyframe exists')
+    keys.append({'kind': kind, 'path': str(path), 'sha256': digest, 'previs_frame': previs_frame, 'approval': 'pending', 'review_notes': []})
+    _save(state_path, state)
+
+
+def note(state_path, kind, ident, note=None, resolve=None, evidence=None):
+    """Write a defect on an asset or keyframe, or close every open one as fixed/accepted with evidence."""
+    state = _load(state_path); notes = _record(state, kind, ident).setdefault('review_notes', [])
+    if note: notes.append({'note': note})
+    elif resolve in ('fixed', 'accepted'):
+        if not (isinstance(evidence, str) and evidence.strip()): raise ValueError('evidence required: the new version or the user\'s words')
+        for item in notes:
+            if isinstance(item, dict) and item.get('resolution') not in ('fixed', 'accepted'): item.update(resolution=resolve, evidence=evidence)
+    else: raise ValueError('give a note, or a resolution (fixed or accepted) with evidence')
+    _save(state_path, state)
+
+
+def bind(state_path):
+    """Bind the approved version of every role to each shot that uses it."""
+    state = _load(state_path)
+    approved = {a['role_id']: a for a in state.get('assets') or [] if isinstance(a, dict) and a.get('approval') == 'approved'}
+    for shot in state.get('shots') or []:
+        roles = list(dict.fromkeys(r for r in (shot.get('object_roles') or {}).values() if isinstance(r, str)))
+        missing = [r for r in roles if r not in approved]
+        if missing: raise ValueError(f"{shot.get('id')}: no approved asset for {', '.join(missing)}")
+        shot['asset_bindings'] = [{'role_id': r, 'version': approved[r].get('version'), 'sha256': approved[r].get('sha256')} for r in roles]
     _save(state_path, state)
 
 
@@ -150,6 +215,14 @@ def main():
     q.add_argument('kind', choices=('story', 'reference', 'previs', 'asset', 'keyframe', 'continuity'))
     q.add_argument('ident', help='asset: role@version; keyframe: path; continuity: role; otherwise any text')
     q.add_argument('--evidence', required=True, help="the user's words")
+    q = sub.add_parser('asset', help='add a pending asset record'); q.add_argument('state'); q.add_argument('ident', help='role@version')
+    q.add_argument('--kind', required=True, choices=('character', 'prop', 'set')); q.add_argument('--path', required=True)
+    q = sub.add_parser('keyframe', help='add a pending keyframe to a shot'); q.add_argument('state'); q.add_argument('shot'); q.add_argument('path')
+    q.add_argument('--kind', required=True, choices=('start', 'end', 'reference')); q.add_argument('--previs-frame', type=int)
+    q = sub.add_parser('note', help='write or close review notes on an asset or keyframe'); q.add_argument('state')
+    q.add_argument('kind', choices=('asset', 'keyframe')); q.add_argument('ident'); q.add_argument('--note')
+    q.add_argument('--resolve', choices=('fixed', 'accepted')); q.add_argument('--evidence')
+    q = sub.add_parser('bind', help='bind approved assets to the shots that use their roles'); q.add_argument('state')
     a = p.parse_args()
     try:
         if a.action == 'lock': lock(a.state, a.owner, a.purpose)
@@ -158,6 +231,10 @@ def main():
         elif a.action == 'submit': submit(a.state, a.request_id, a.provider_job_id)
         elif a.action == 'settle': settle(a.state, a.request_id, a.charge, a.output, a.status)
         elif a.action == 'approve': approve(a.state, a.kind, a.ident, a.evidence)
+        elif a.action == 'asset': asset(a.state, a.ident, a.kind, a.path)
+        elif a.action == 'keyframe': keyframe(a.state, a.shot, a.path, a.kind, a.previs_frame)
+        elif a.action == 'note': note(a.state, a.kind, a.ident, a.note, a.resolve, a.evidence)
+        elif a.action == 'bind': bind(a.state)
     except ValueError as error:
         print(error); sys.exit(1)
     except Exception as error:  # a malformed or missing state file: still one line, never a traceback
