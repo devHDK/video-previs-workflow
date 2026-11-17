@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from motion import figure_moves, members, travel  # noqa: E402
+
+
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -260,6 +264,100 @@ def budget_errors(state):
     return ['budget: retry_reserve must cover max_shot_quote']
 
 
+GROUP_SIZE = 5  # from this many figures on one role, how they move together is a decision of its own
+MATCH_S = 0.75  # a previs action counts as listed when a reference event or a decision lies this close to it
+
+
+def _figures(spec_shot, roles):
+    """role -> the capsule-rooted figures mapped to it; parts of a figure, props and set pieces do not count."""
+    objects = {o['id']: o for o in map(_dict, _list(_dict(spec_shot).get('objects'))) if isinstance(o.get('id'), str)}
+    found = {}
+    for oid in members(objects):
+        role = _dict(roles).get(oid)
+        if isinstance(role, str) and objects[oid].get('shape') == 'capsule': found.setdefault(role, []).append(objects[oid])
+    return found
+
+
+def group_errors(shot, spec_shot):
+    """A crowd written without saying whether it moves as one or raggedly comes out in lockstep."""
+    sid, errors = shot.get('id'), []
+    for role, figures in _figures(spec_shot, shot.get('object_roles')).items():
+        if len(figures) < GROUP_SIZE: continue
+        group = _dict(_dict(shot.get('group_motion')).get(role))
+        if group.get('sync') not in ('unison', 'ragged'):
+            errors.append(f'{sid}: {len(figures)} figures share role {role}; group_motion.{role}.sync must be unison or ragged')
+        elif group['sync'] == 'ragged' and not _positive(group.get('spread_s')):
+            errors.append(f'{sid}: group_motion.{role}.spread_s required (seconds each member may lead or lag: half the measured width)')
+    return errors
+
+
+def motion_errors(shot, spec_shot, fps, ref_shot):
+    """Reference-led: every turn, direction change or stop a figure makes in previs is a reference event or a recorded
+    decision, and a figure that travels has its route written in the reference."""
+    sid, errors, ref_shot = shot.get('id'), [], _dict(ref_shot)
+    frames, start = _dict(spec_shot).get('frames'), ref_shot.get('start')
+    if not (_positive(frames) and _positive(fps) and _number(start)): return []
+    listed = [e['t'] - start for e in map(_dict, _list(ref_shot.get('events'))) if _number(e.get('t'))]
+    listed += [d['t'] for d in map(_dict, _list(shot.get('unlisted_motion'))) if _number(d.get('t')) and _text(d.get('decision'))]
+    for role, figures in _figures(spec_shot, shot.get('object_roles')).items():
+        if len(figures) >= GROUP_SIZE: continue
+        for item in figures:
+            if not _list(item.get('keys')): continue
+            for move in figure_moves(item, frames, fps):
+                if not any(abs(move['t'] - t) <= MATCH_S for t in listed):
+                    size = f" {move['degrees']} deg" if 'degrees' in move else ''
+                    errors.append(f"{sid}: {role} {move['kind']}{size} at {move['t']:g} s has no reference event; list it in the "
+                                  f'reference or record an unlisted_motion decision')
+            metres = travel(item, frames)
+            if metres > 1 and not _text(_dict(ref_shot.get('travel')).get(role)):
+                errors.append(f'reference {sid}: travel.{role} required (destination, route, who stands beside it): '
+                              f'it moves {metres:.1f} m in previs')
+    return errors
+
+
+def _reference(state, root):
+    record = _dict(state.get('reference'))
+    if record.get('approval') != 'approved' or not isinstance(record.get('path'), str): return {}
+    try: return _dict(json.loads((root / record['path']).read_text()))
+    except (OSError, ValueError): return {}
+
+
+def blocking_errors(state, root, shot_ids=None):
+    spec, ref = _spec(state, root), _reference(state, root)
+    spec_shots = {s.get('id'): s for s in map(_dict, _list(spec.get('shots')))}
+    ref_shots = {s.get('id'): s for s in map(_dict, _list(ref.get('shots')))}
+    errors = []
+    for shot in map(_dict, _list(state.get('shots'))):
+        sid = shot.get('id')
+        if not isinstance(sid, str) or sid not in spec_shots or (shot_ids is not None and sid not in shot_ids): continue
+        errors += group_errors(shot, spec_shots[sid])
+        if sid in ref_shots: errors += motion_errors(shot, spec_shots[sid], spec.get('fps'), ref_shots[sid])
+    return errors
+
+
+def check_qa(state, root):
+    """After generation: a selected take per shot, a result for every required event, a measured spread per group."""
+    if not isinstance(state, dict): return ['state must be an object']
+    errors = []
+    for shot in map(_dict, _list(state.get('shots'))):
+        sid, take = shot.get('id'), shot.get('selected_output')
+        take = take if isinstance(take, str) else _dict(take).get('take')
+        if not (isinstance(take, str) and (root / take).is_file()): errors.append(f'{sid}: selected_output take file required')
+        results = _dict(shot.get('event_results'))
+        for event in _list(shot.get('required_events')):
+            name = event if isinstance(event, str) else _dict(event).get('event')
+            result = _dict(results.get(name))
+            if result.get('result') not in ('pass', 'accepted') or not _text(result.get('evidence')):
+                errors.append(f'{sid}: event needs a pass or accepted result with evidence: {name}')
+        for role, group in _dict(shot.get('group_motion')).items():
+            group = _dict(group); measured, target = group.get('measured_s'), group.get('spread_s')
+            if not _number(measured): errors.append(f'{sid}: group_motion.{role}.measured_s required (media.py spread on the take)')
+            elif group.get('sync') == 'ragged' and _positive(target) and not 0.5 * target <= measured <= 2 * target \
+                    and not (group.get('result') == 'accepted' and _text(group.get('evidence'))):
+                errors.append(f'{sid}: group {role} spread {measured:g} s is outside 0.5-2x the target {target:g} s')
+    return errors
+
+
 def check_project(state, root):
     if not isinstance(state, dict): return ['state must be an object']
     errors = story_errors(state, root)
@@ -273,8 +371,8 @@ def check_project(state, root):
         errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root)
         for role, shas in _shas(shot.get('asset_bindings')).items(): versions.setdefault(role, set()).update(shas)
     errors += [f'role {role} is bound to different versions across shots' for role, shas in versions.items() if len(shas) > 1]
-    return (errors + continuity_errors(state) + kind_errors(state) + note_errors(state) + profile_errors(state)
-            + duration_errors(state, root) + budget_errors(state))
+    return (errors + blocking_errors(state, root) + continuity_errors(state) + kind_errors(state) + note_errors(state)
+            + profile_errors(state) + duration_errors(state, root) + budget_errors(state))
 
 
 def check_submission(state, job, root):
@@ -295,7 +393,7 @@ def check_submission(state, job, root):
         if not isinstance(cid, str) or cid not in by_id: errors.append(f'{cid}: shot not found in state'); continue
         errors += shot_errors(state, by_id[cid], [] if spec_errors else objects.get(cid), root)
         roles |= {r for r in _dict(by_id[cid].get('object_roles')).values() if isinstance(r, str)}
-    errors += continuity_errors(state, roles)
+    errors += blocking_errors(state, root, covered) + continuity_errors(state, roles)
     errors += kind_errors(state) + note_errors(state) + profile_errors(state) + duration_errors(state, root, covered)
     start = approved_start_sha(shot)
     if start is not None and job.get('start_frame_sha256') != start:
@@ -328,6 +426,7 @@ def main():
     sub = p.add_subparsers(dest='action', required=True)
     q = sub.add_parser('ready', help='whole project ready for paid video generation'); q.add_argument('state')
     q = sub.add_parser('submit', help='one paid video job'); q.add_argument('state'); q.add_argument('job')
+    q = sub.add_parser('qa', help='selected takes checked against required events'); q.add_argument('state')
     q = sub.add_parser('reference', help='reference breakdown file, before approval'); q.add_argument('file')
     q.add_argument('--max-duration', type=float, help="the model's longest take in seconds, to check split takes")
     a = p.parse_args()
@@ -335,6 +434,7 @@ def main():
     state_path = Path(a.state).resolve()
     state = json.loads(state_path.read_text())
     if a.action == 'ready': _report(check_project(state, state_path.parent))
+    if a.action == 'qa': _report(check_qa(state, state_path.parent))
     else: _report(check_submission(state, json.loads(Path(a.job).read_text()), state_path.parent))
 
 

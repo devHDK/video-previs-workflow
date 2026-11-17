@@ -250,7 +250,7 @@ def dupes(source, fix=None):
             enc.stdin.write(cur)
         if len(nxt) != size: break
         prev, cur, i = cur, nxt, i + 1
-    enc.stdin.close()
+    enc.stdin.close(); dec.stdout.close()
     if dec.wait() or enc.wait(): raise RuntimeError('ffmpeg failed while rewriting frames; inspect the output')
     return result
 
