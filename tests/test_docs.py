@@ -44,7 +44,10 @@ class DocTests(unittest.TestCase):
                      '`travel`', 'event_results', 'gate.py qa', 'media.py dupes', 'media.py spread', 'media.py reframe',
                      'state.py asset', 'state.py keyframe', 'state.py note', 'state.py bind',
                      'state.py init', 'state.py put', 'state.py charge', 'prop_results', '`count`', '`states`',
-                     'audit.line', 'line_cross_ok', 'screen_direction', 'line_crossed', 'screen_direction_reversed', '--plan', 'plan.png', 'sensor height', 'Floor plan'):
+                     'audit.line', 'line_cross_ok', 'screen_direction', 'line_crossed', 'screen_direction_reversed', '--plan', 'plan.png', 'sensor height', 'Floor plan',
+                     'candidates', '--low', 'source.rights', 'upload_agreed', '`match`',
+                     'media.py sheet', 'Footage-led', 'Clearance', 'no_previs',
+                     '`plan`', '--source', '--origin', '--cell'):
             self.assertTrue(name in refs, f'{name} is not documented in references/')
 
     def test_shot_design_is_scoped_to_the_idea_led_route(self):
@@ -53,6 +56,22 @@ class DocTests(unittest.TestCase):
         for name in ('reference-led', '`audit.subjects`', '`audit.line`', '`line_cross_ok`', '`audit.screen_direction`', '36 mm'):
             self.assertIn(name, section)
         self.assertIn('--plan', (SKILLS / 'video-previs-workflow/SKILL.md').read_text())
+
+    def test_footage_led_rules_keep_the_review_with_the_user(self):
+        text = (SKILLS / 'video-previs-workflow/references/production.md').read_text()
+        section = text.split('## Footage-led production')[1].split('\n## ')[0]
+        for name in ('brief.md', 'people-free', 'third-party'): self.assertIn(name, section)
+        for name in ('media.py sheet', '`review_notes`', 'first pass'): self.assertIn(name, text.split('## Shot keyframes')[1])
+        self.assertIn('footage-led', (SKILLS / 'video-previs-workflow/SKILL.md').read_text())
+
+    def test_trial_rules_are_written_down(self):
+        text = (SKILLS / 'video-previs-workflow/references/production.md').read_text()
+        led = text.split('## Footage-led production')[1].split('\n## ')[0]
+        for name in ('guest', 'Staff', 'consent', 'people-free frame'): self.assertIn(name, led)
+        for name in ('one role per outfit', 'hides the hair'): self.assertIn(name, text.split('## Appearance review')[1].split('\n## ')[0])
+        self.assertIn('in words', text.split('## Shot keyframes')[1].split('\n## ')[0])
+        self.assertIn('screen recording', text.split('## Reference-led route')[1].split('\n## ')[0])
+        self.assertIn('shortest take', (SKILLS / 'video-previs-workflow/references/generation.md').read_text())
 
     def test_skill_md_stays_compact(self):
         self.assertLessEqual(len((SKILLS / 'video-previs-workflow/SKILL.md').read_bytes()), 6500)

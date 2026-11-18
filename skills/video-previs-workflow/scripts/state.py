@@ -148,6 +148,8 @@ def put(state_path, section, data):
     else:
         if section == 'budget': data = {k: v for k, v in data.items() if k not in COUNTERS}
         if section in ('story', 'reference', 'previs'):  # a changed file is a new, unapproved record
+            need = 'spec_path' if section == 'previs' else 'path'  # the record points at a file; it is not the file
+            if not isinstance(data.get(need), str): raise ValueError(f'{section}: {need} required')
             path = data.get('path') or data.get('spec_path')
             data = dict(data, approval='pending')
             if section != 'previs': data['sha256'] = _hashed(state_path, path) if isinstance(path, str) else None
@@ -193,16 +195,18 @@ def _hashed(state_path, path):
     return hashlib.sha256(file.read_bytes()).hexdigest()
 
 
-def asset(state_path, ident, kind, path):
+def asset(state_path, ident, kind, path, source='generated', origin=None):
     """Add a pending asset record `role@version` with the hash of its file."""
     role, _, version = ident.partition('@')
     if not (role and version): raise ValueError('asset is named role@version')
     if kind not in ('character', 'prop', 'set'): raise ValueError('kind must be character, prop or set')
+    if source not in ('generated', 'existing', 'footage'): raise ValueError('source must be generated, existing or footage')
     digest, state = _hashed(state_path, path), _load(state_path)
     assets = state.setdefault('assets', [])
     if any(isinstance(a, dict) and (a.get('role_id'), a.get('version')) == (role, version) for a in assets): raise ValueError('asset exists')
-    assets.append({'role_id': role, 'version': version, 'kind': kind, 'source': 'generated', 'original_path': str(path),
-                   'original_sha256': digest, 'working_path': str(path), 'sha256': digest, 'approval': 'pending', 'review_notes': []})
+    assets.append({'role_id': role, 'version': version, 'kind': kind, 'source': source, 'original_path': str(path),
+                   'original_sha256': digest, 'working_path': str(path), 'sha256': digest, 'approval': 'pending', 'review_notes': [],
+                   **({'origin': origin} if origin else {})})
     _save(state_path, state)
 
 
@@ -263,6 +267,7 @@ def main():
     q.add_argument('--evidence', required=True, help="the user's words")
     q = sub.add_parser('asset', help='add a pending asset record'); q.add_argument('state'); q.add_argument('ident', help='role@version')
     q.add_argument('--kind', required=True, choices=('character', 'prop', 'set')); q.add_argument('--path', required=True)
+    q.add_argument('--source', default='generated', choices=('generated', 'existing', 'footage')); q.add_argument('--origin', help='where a footage crop came from: clip, time, area')
     q = sub.add_parser('keyframe', help='add a pending keyframe to a shot'); q.add_argument('state'); q.add_argument('shot'); q.add_argument('path')
     q.add_argument('--kind', required=True, choices=('start', 'end', 'reference')); q.add_argument('--previs-frame', type=int)
     q = sub.add_parser('note', help='write or close review notes on an asset or keyframe'); q.add_argument('state')
@@ -280,7 +285,7 @@ def main():
         elif a.action == 'init': init(a.state, a.project_id)
         elif a.action == 'put': put(a.state, a.section, json.loads(Path(a.file).read_text()))
         elif a.action == 'approve': approve(a.state, a.kind, a.ident, a.evidence)
-        elif a.action == 'asset': asset(a.state, a.ident, a.kind, a.path)
+        elif a.action == 'asset': asset(a.state, a.ident, a.kind, a.path, a.source, a.origin)
         elif a.action == 'keyframe': keyframe(a.state, a.shot, a.path, a.kind, a.previs_frame)
         elif a.action == 'note': note(a.state, a.kind, a.ident, a.note, a.resolve, a.evidence)
         elif a.action == 'bind': bind(a.state)

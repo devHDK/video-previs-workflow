@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -39,14 +40,22 @@ def _approved(state, key): return _dict(state.get(key)).get('approval') == 'appr
 def frame_at(t, fps): return int(t * fps + 0.5)  # round each cut once, so shot lengths never drift
 
 
-def check_reference(ref, spec=None, max_duration=None):
+def check_reference(ref, spec=None, max_duration=None, unblocked=None):
     """Reference breakdown shape; given the previs spec, also each shot's frames against the reference cuts;
-    given the model's longest take, also that a continuous source take was not split while it fits."""
+    given the model's longest take, also that a continuous source take was not split while it fits.
+    `unblocked` maps shots that skip previs to the frames recorded for them in state."""
     if not isinstance(ref, dict): return ['reference must be an object']
     source, errors = _dict(ref.get('source')), []
     if not (_text(source.get('path')) and _text(source.get('sha256'))):
         errors.append('reference: source.path and source.sha256 are required')
+    if source.get('rights') not in ('own', 'third_party'): errors.append('reference: source.rights must be own or third_party')
+    if ref.get('match') not in ('format', 'shot'): errors.append('reference: match must be format or shot')
     if not _setup_ok(ref): errors.append(f'reference: {SETUP_NEEDED}')
+    candidates = ref.get('candidates', [])
+    if not (isinstance(candidates, list) and all(isinstance(c, dict) and _number(c.get('t')) for c in candidates)):
+        errors.append('reference: candidates must be a list of {t, score, decision}')
+    else:  # a weak scene change is a cut someone missed until it is looked at
+        errors += [f"reference: candidate cut at {c['t']:g} s needs a decision" for c in candidates if not _text(c.get('decision'))]
     shots = ref.get('shots')
     if not isinstance(shots, list) or not shots: return errors + ['reference: shots must be a nonempty list']
     fps = _dict(spec).get('fps')
@@ -67,7 +76,8 @@ def check_reference(ref, spec=None, max_duration=None):
             errors.append(f'reference {sid}: camera and action are required')
         samples = [e for e in map(_dict, _list(shot.get('camera_evidence'))) if _number(e.get('t')) and start <= e['t'] <= end
                    and (_positive(e.get('subject_px')) or _positive(e.get('background_px')))]
-        if len(samples) < 2 or len(samples) != len(_list(shot.get('camera_evidence'))):  # measured, not eyeballed
+        given = len(_list(shot.get('camera_evidence')))  # measured, not eyeballed; a format match designs its own cameras
+        if len(samples) != given or (len(samples) < 2 and (given or ref.get('match') != 'format')):
             errors.append(f'reference {sid}: camera_evidence needs 2+ samples with t and subject_px or background_px')
         if shot.get('continues_previous') is True:
             if not runs: errors.append(f'reference {sid}: continues_previous on the first shot')
@@ -79,9 +89,14 @@ def check_reference(ref, spec=None, max_duration=None):
             t = event.get('t')
             if not (_number(t) and _text(event.get('event'))): errors.append(f'reference {sid}: events need t and event')
             elif not start <= t < end: errors.append(f'reference {sid}: event at {t} s is outside the shot')  # a cut opens the next shot
-        if spec is None or _text(shot.get('decision')): continue  # a recorded decision approves the deviation
+        plan = _dict(shot.get('plan'))  # a format match designs new shots: what fills each one is what gets approved
+        if ref.get('match') == 'format' and not (plan.get('source') in ('generated', 'footage', 'reuse') and _text(plan.get('what'))):
+            errors.append(f'reference {sid}: plan needs source (generated, footage or reuse) and what')
+        if spec is None or _text(shot.get('decision')) or plan.get('source') in ('footage', 'reuse'): continue  # nothing to previsualise, or a recorded deviation
         expected = frame_at(end, fps) - frame_at(start, fps)
-        if sid not in frames: errors.append(f'reference {sid}: shot not in previs spec')
+        if sid in _dict(unblocked):
+            if unblocked[sid] != expected: errors.append(f'{sid}: frames {unblocked[sid]} differ from reference timing {expected}')
+        elif sid not in frames: errors.append(f'reference {sid}: shot not in previs spec')
         elif frames[sid] != expected: errors.append(f'{sid}: previs frames {frames[sid]} differ from reference timing {expected}')
     if _positive(max_duration):
         errors += [f'reference {first}: take of {seconds:.1f} s fits max_duration_s {max_duration:g}; merge the split shots'
@@ -89,6 +104,12 @@ def check_reference(ref, spec=None, max_duration=None):
     elif any(count > 1 for first, seconds, count in runs):  # an unchecked split would only be caught at `ready`, after previs
         errors.append('reference: a split take needs --max-duration (generation_profile.max_duration_s) to be checked')
     return errors
+
+
+def _unblocked(state):
+    """Shots that skip previs with a recorded reason (a close insert, a POV detail: nothing to block) -> their frames."""
+    return {s['id']: s.get('frames') for s in map(_dict, _list(_dict(state).get('shots')))
+            if isinstance(s.get('id'), str) and _text(s.get('no_previs'))}
 
 
 def reference_errors(state, root):
@@ -100,7 +121,7 @@ def reference_errors(state, root):
     if isinstance(path, str) and (root / path).is_file():  # a missing spec is reported by spec_objects
         try: spec = _dict(json.loads((root / path).read_text()))
         except ValueError: pass
-    return check_reference(ref, spec, _dict(state.get('generation_profile')).get('max_duration_s'))
+    return check_reference(ref, spec, _dict(state.get('generation_profile')).get('max_duration_s'), _unblocked(state))
 
 
 def story_errors(state, root):
@@ -151,9 +172,15 @@ def approved_start_sha(shot):
     return None
 
 
-def shot_errors(state, shot, objects, root):
+def shot_errors(state, shot, objects, root, spec_ok=True):
     sid, errors = shot.get('id'), []
-    if objects is None: errors.append(f'{sid}: shot not found in previs spec'); objects = []
+    unblocked = objects is None and _text(shot.get('no_previs'))
+    if spec_ok and objects is not None and _text(shot.get('no_previs')): errors.append(f'{sid}: no_previs is set but the shot is in the previs spec')
+    elif objects is None and not _text(shot.get('no_previs')): errors.append(f'{sid}: shot not found in previs spec')
+    elif objects is None and not _positive(shot.get('frames')): errors.append(f'{sid}: frames required for a shot without previs')
+    objects = objects or []
+    if unblocked and not isinstance(shot.get('object_roles'), dict):  # with no spec objects to map, the roles in frame must be stated
+        errors.append(f'{sid}: object_roles required for a shot without previs (name what is in the frame, or {{}})')
     if not _list(shot.get('required_events')): errors.append(f'{sid}: required_events missing')
     roles = _dict(shot.get('object_roles'))
     errors += [f'{sid}: object {oid} has no role decision (map to a role or null)' for oid in objects if oid not in roles]
@@ -231,6 +258,7 @@ def duration_errors(state, root, shot_ids=None):
     if not (_positive(limit) and _positive(fps)): return []  # a missing profile is reported by profile_errors
     seconds = {s.get('id'): s['frames'] / fps for s in map(_dict, _list(spec.get('shots')))
                if isinstance(s.get('id'), str) and _number(s.get('frames'))}
+    seconds.update({sid: n / fps for sid, n in _unblocked(state).items() if sid not in seconds and _positive(n)})
     over = lambda who, value: [f'{who} {value:.1f} s exceeds generation_profile.max_duration_s {limit:g}'] if value > limit else []
     if shot_ids is not None:
         return over('job: take of', sum(seconds.get(sid, 0) for sid in shot_ids if isinstance(sid, str)))
@@ -377,11 +405,24 @@ def check_project(state, root):
     for shot in _list(state.get('shots')):
         if not isinstance(shot, dict): continue
         if not isinstance(shot.get('id'), str): errors.append('shot id must be a string'); continue
-        errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root)
+        errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root, not spec_errors)
         for role, shas in _shas(shot.get('asset_bindings')).items(): versions.setdefault(role, set()).update(shas)
     errors += [f'role {role} is bound to different versions across shots' for role, shas in versions.items() if len(shas) > 1]
     return (errors + blocking_errors(state, root) + continuity_errors(state) + kind_errors(state) + note_errors(state)
             + profile_errors(state) + duration_errors(state, root) + budget_errors(state))
+
+
+def footage_errors(sid, job, ref, root):
+    """Third-party reference footage reaches a provider only after the user agreed, and the agreement is on record."""
+    source = _dict(ref.get('source'))
+    if source.get('rights') != 'third_party' or _text(source.get('upload_agreed')): return []
+    shots = [s for s in _list(ref.get('shots')) if isinstance(s, dict)]
+    footage = [source.get('path')] + [s.get('clip') for s in shots] + [p for s in shots for p in _list(s.get('stills'))]
+    same = lambda p: os.path.normpath(os.path.join(str(root), p))  # relative and absolute spellings of one file
+    footage = {same(p) for p in footage if _text(p)}
+    paths = [i.get('path') for i in _list(job.get('inputs')) if isinstance(i, dict)]
+    return [f'{sid}: job input {p} is third-party reference footage; record source.upload_agreed first'
+            for p in paths if _text(p) and same(p) in footage]
 
 
 def check_submission(state, job, root):
@@ -400,10 +441,11 @@ def check_submission(state, job, root):
     roles = set()
     for cid in covered:
         if not isinstance(cid, str) or cid not in by_id: errors.append(f'{cid}: shot not found in state'); continue
-        errors += shot_errors(state, by_id[cid], [] if spec_errors else objects.get(cid), root)
+        errors += shot_errors(state, by_id[cid], [] if spec_errors else objects.get(cid), root, not spec_errors)
         roles |= {r for r in _dict(by_id[cid].get('object_roles')).values() if isinstance(r, str)}
     errors += blocking_errors(state, root, covered) + continuity_errors(state, roles)
     errors += kind_errors(state) + note_errors(state) + profile_errors(state) + duration_errors(state, root, covered)
+    errors += footage_errors(sid, job, _reference(state, root), root)
     start = approved_start_sha(shot)
     if start is not None and job.get('start_frame_sha256') != start:
         errors.append(f'{sid}: job start frame is not the approved keyframe')

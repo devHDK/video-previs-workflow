@@ -66,6 +66,8 @@ Codex에서는 `$video-previs-workflow`, Claude Code에서는 `/video-previs-wor
 - 검토 결함 기록: 외형·키프레임 검토에서 적은 결함은 '고침' 또는 '사용자 수용'으로 닫아야 승인됩니다. 소품은 어디서 나와 누가 들고 어디로 가는지 적어야 합니다.
 - 프리비즈 반복 단축: 이벤트 프레임 정지컷만 렌더(`--frames`), 렌더 없는 사전 검사(`--audit-only`), 지정 시점 비교 시트(`pair --times`)로 맞춘 뒤 전체 렌더는 한 번만 합니다.
 - 샷 설계와 연출 검사: 아이디어에서 출발하는 경로의 샷 설계 규칙(눈높이 기본, 샷 크기별 카메라 거리, 액션 라인, 화면 방향)과, 컷에서 액션 라인을 넘거나 화면 진행 방향이 뒤집힌 샷을 알려 주는 감사 항목, 여러 샷이 한 공간을 쓸 때의 평면도(`--plan`).
+- 촬영본 기반 제작: 실제 장소 촬영본에 생성 인물을 얹을 때의 규칙(클립별 인물·제3자 표식 확인, 사람 없는 세트 참고 이미지, 사실은 글이 아닌 실사 프레임으로 전달), 키프레임을 실사와 나란히 놓는 대조 점검(`media.py sheet`), 레퍼런스 출처(`source.rights`)와 따라가는 수준(`match`) 기록, 기준 아래 장면 변화를 후보 컷(`candidates`)으로 남겨 확인받는 컷 분석.
+- 시험 제작에서 나온 보완: 형식만 따라가는 레퍼런스의 샷별 계획(`plan`), 블로킹할 것이 없는 근접 컷의 프리비즈 생략(`no_previs`), 검토용 큰 칸 시트(`sheet --cell`), 촬영본에서 자른 자산의 출처 기록(`asset --source footage`).
 - 키프레임 연속성: 여러 샷에 나오는 역할마다 키프레임을 한 줄로 모은 시트를 만들고, 승인 해시가 현재 키프레임과 일치해야 게이트를 통과.
 - 유료 생성 게이트: 프로젝트 준비 상태, 작업별 견적·상한·재시도 예비분, 같은 장소의 연속 샷을 한 테이크로 묶는 시퀀스 작업 검사.
 - 수동 웹 생성 경로: 웹 전용 요금제(예: Higgsfield Unlimited)를 쓸 때 업로드 순서대로 입력과 `request.md`를 묶고, 사람이 떨어뜨린 결과 하나를 디코드·해시 확인 후 반입. 웹 앱 자동화는 하지 않습니다.
@@ -80,7 +82,7 @@ Codex에서는 `$video-previs-workflow`, Claude Code에서는 `/video-previs-wor
 | `validate_spec.py` | 장면 명세 검사, 이전 버전 대비 변경 샷 식별 |
 | `render_previs.py` | Blender 백그라운드 프리비즈 렌더·지오메트리 감사. `--frames` `--size` `--shot` `--audit-only` `--plan` |
 | `blocking.py` | 프로젝트 장면 스크립트용 도우미: 초→프레임, 궤적, 몸 기준 위치, 얼굴 표시가 달린 사람 프록시 |
-| `media.py` | `probe` `extract` `encode` `assemble` `compare` `pair`(`--points`, `--times`) `continuity` `cuts` |
+| `media.py` | `probe` `extract` `encode` `assemble` `compare` `pair`(`--points`, `--times`) `continuity` `cuts`(`--low`) `sheet` |
 | `gate.py` | `reference`(`--max-duration`) `ready` `submit`: 상황 설정서·생성 조건·테이크 길이·소품 출처·검토 결함까지 검사 (상태를 읽기만 하고 수정하지 않음) |
 | `state.py` | `lock` `unlock` `reserve` `submit` `settle` `approve` (상태를 수정하는 유일한 스크립트) |
 | `handoff.py` | 수동 웹 생성 `pack` / `ingest` (상태를 수정하지 않음) |

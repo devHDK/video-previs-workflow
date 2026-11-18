@@ -63,6 +63,47 @@ class GateProjectTests(unittest.TestCase):
     def test_ready_project_passes(self):
         self.assertEqual(self.errors(), [])
 
+    def insert(self, **fields):
+        self.state['shots'].append(dict(self.shot, id='s02', object_roles={}, props={}, asset_bindings=[], **dict({'frames': 24}, **fields)))
+        return self.state['shots'][-1]
+
+    def test_no_previs_shot_must_state_its_roles(self):
+        shot = self.insert(no_previs='close insert'); del shot['object_roles']
+        self.assertEqual(self.errors(), ['s02: object_roles required for a shot without previs (name what is in the frame, or {})'])
+        for bad in ('hero', ['hero'], None):
+            shot['object_roles'] = bad
+            self.assertEqual(self.errors(), ['s02: object_roles required for a shot without previs (name what is in the frame, or {})'], bad)
+        shot['object_roles'] = {}
+        self.assertEqual(self.errors(), [])
+
+    def test_missing_spec_does_not_blame_no_previs_shots(self):
+        self.insert(no_previs='close insert'); (self.root / 'scene.json').unlink()
+        self.assertNotIn('s02: no_previs is set but the shot is in the previs spec', self.errors())
+        self.assertIn('previs: spec file not found', self.errors())
+
+    def test_shot_without_blocking_may_skip_previs_with_a_reason(self):
+        shot = self.insert()
+        self.assertEqual(self.errors(), ['s02: shot not found in previs spec'])
+        shot['no_previs'] = 'close insert: one hand and a card, nothing to place'
+        self.assertEqual(self.errors(), [])
+        shot['no_previs'] = '  '
+        self.assertEqual(self.errors(), ['s02: shot not found in previs spec'])
+        for bad in (7, ['x'], True):
+            shot['no_previs'] = bad
+            self.assertEqual(self.errors(), ['s02: shot not found in previs spec'])
+
+    def test_no_previs_shot_stays_out_of_the_spec_and_keeps_its_length_limit(self):
+        self.shot['no_previs'] = 'x'
+        self.assertEqual(self.errors(), ['s01: no_previs is set but the shot is in the previs spec'])
+        del self.shot['no_previs']
+        shot = self.insert(no_previs='close insert', frames=24 * 31)
+        self.assertEqual(self.errors(), ['s02: 31.0 s exceeds generation_profile.max_duration_s 30'])
+        job = {'shot': 's02', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        self.assertEqual(self.g.check_submission(self.state, job, self.root), ['job: take of 31.0 s exceeds generation_profile.max_duration_s 30'])
+        for bad in (None, 0, '24'):
+            shot['frames'] = bad
+            self.assertEqual(self.errors(), ['s02: frames required for a shot without previs'])
+
     def test_legacy_state_reports_without_raising(self):
         self.state = {'previs': {'spec_path': 'scene.json', 'approval': 'approved'},
                       'shots': [{'id': 's01', 'frames': 72, 'asset_bindings': []}], 'budget': {'cap': 200}}
@@ -239,9 +280,11 @@ def reference_project(root: Path) -> dict:
     return state
 
 
-def write_reference(root, shots):
-    (root / 'reference.json').write_text(json.dumps(
-        {'version': 1, 'source': {'path': 'inputs/reference.mp4', 'sha256': 'abc'}, 'setup': SETUP, 'shots': shots}))
+def write_reference(root, shots, rights='own', match='shot', upload_agreed=None, candidates=None):
+    source = {'path': 'inputs/reference.mp4', 'sha256': 'abc', 'rights': rights, 'upload_agreed': upload_agreed}
+    ref = {'version': 1, 'source': {k: v for k, v in source.items() if v is not None}, 'setup': SETUP, 'shots': shots,
+           'match': match, 'candidates': candidates}
+    (root / 'reference.json').write_text(json.dumps({k: v for k, v in ref.items() if v is not None}))
 
 
 class GateReferenceTests(unittest.TestCase):
@@ -257,9 +300,88 @@ class GateReferenceTests(unittest.TestCase):
     def errors(self):
         return self.g.check_project(self.state, self.root)
 
-    def rewrite(self, shots):
-        write_reference(self.root, shots)
+    def rewrite(self, shots, **fields):
+        write_reference(self.root, shots, **fields)
         self.state['reference']['sha256'] = sha(self.root / 'reference.json')
+
+    def test_candidates_need_a_decision(self):
+        self.rewrite(self.shots(), candidates=[{'t': 0.5, 'score': 0.2}])
+        self.assertIn('reference: candidate cut at 0.5 s needs a decision', self.errors())
+        self.rewrite(self.shots(), candidates=[{'t': 0.5, 'score': 0.2, 'decision': 'not a cut: flash'}])
+        self.assertEqual(self.errors(), [])
+        for bad in ('x', [3], [{'t': 'a'}]):
+            self.rewrite(self.shots(), candidates=bad)
+            self.assertIn('reference: candidates must be a list of {t, score, decision}', self.errors())
+
+    def test_rights_and_match_are_required(self):
+        for change, message in (({'rights': None}, 'reference: source.rights must be own or third_party'),
+                                ({'rights': 'fair use'}, 'reference: source.rights must be own or third_party'),
+                                ({'match': None}, 'reference: match must be format or shot'),
+                                ({'match': 'loose'}, 'reference: match must be format or shot')):
+            self.rewrite(self.shots(), **change)
+            self.assertEqual(self.errors(), [message], change)
+
+    def test_shot_without_previs_still_follows_the_reference_cut(self):
+        spec = json.loads((self.root / 'scene.json').read_text()); spec['shots'] = spec['shots'][:1]
+        (self.root / 'scene.json').write_text(json.dumps(spec))
+        self.assertEqual(self.errors(), ['reference s02: shot not in previs spec'])
+        self.state['shots'].append(dict(self.state['shots'][0], id='s02', object_roles={}, props={}, asset_bindings=[],
+                                        frames=48, no_previs='POV detail'))
+        self.assertEqual(self.errors(), [])
+        self.state['shots'][1]['frames'] = 40
+        self.assertEqual(self.errors(), ['s02: frames 40 differ from reference timing 48'])
+
+    def test_format_match_needs_a_plan_per_shot(self):
+        self.rewrite(self.shots(), match='format')
+        self.assertEqual(self.errors(), [f'reference {s}: plan needs source (generated, footage or reuse) and what' for s in ('s01', 's02')])
+        for bad in ('footage', ['x'], {'source': 'stock', 'what': 'x'}, {'source': 'footage'}):
+            self.rewrite([dict(s, plan=bad) for s in self.shots()], match='format')
+            self.assertEqual(len(self.errors()), 2, bad)
+        self.rewrite([dict(s, plan={'source': 'generated', 'what': 'new shot'}) for s in self.shots()], match='format')
+        self.assertEqual(self.errors(), [])
+        self.rewrite(self.shots())                                   # match: shot asks for no plan
+        self.assertEqual(self.errors(), [])
+
+    def test_footage_and_reused_shots_need_no_previs(self):
+        spec = json.loads((self.root / 'scene.json').read_text()); spec['shots'] = spec['shots'][:1]
+        (self.root / 'scene.json').write_text(json.dumps(spec))
+        shots = self.shots(); shots[0]['plan'] = {'source': 'generated', 'what': 'hero slides in'}
+        for source in ('footage', 'reuse'):
+            shots[1]['plan'] = {'source': source, 'what': 'sign clip 0468'}
+            self.rewrite(shots, match='format'); self.assertEqual(self.errors(), [], source)
+        shots[1]['plan'] = {'source': 'generated', 'what': 'x'}
+        self.rewrite(shots, match='format'); self.assertEqual(self.errors(), ['reference s02: shot not in previs spec'])
+
+    def test_format_match_needs_no_camera_evidence(self):
+        PLAN = {'source': 'generated', 'what': 'x'}
+        bare = [dict(s, camera_evidence=[], plan=PLAN) for s in self.shots()]
+        self.rewrite(bare)                                   # match: shot
+        self.assertEqual(self.errors(), [f'reference {s}: camera_evidence needs 2+ samples with t and subject_px or background_px'
+                                         for s in ('s01', 's02')])
+        self.rewrite(bare, match='format')
+        self.assertEqual(self.errors(), [])
+        self.rewrite([dict(s, camera_evidence=[{'t': 'x'}], plan=PLAN) for s in self.shots()], match='format')   # given, so it must be sound
+        self.assertEqual(len(self.errors()), 2)
+
+    def test_third_party_footage_as_job_input_needs_a_recorded_agreement(self):
+        base = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        job = dict(base, inputs=[{'path': './inputs/reference.mp4', 'slot': 'video 1'}, {'path': 'previs/s01.mp4'}])
+        self.assertEqual(self.g.check_submission(self.state, job, self.root), [])            # own footage
+        self.rewrite(self.shots(), rights='third_party')
+        self.assertEqual(self.g.check_submission(self.state, job, self.root),
+                         ['s01: job input ./inputs/reference.mp4 is third-party reference footage; record source.upload_agreed first'])
+        for bad in ('x', [3], [{'path': 7}]):
+            self.assertEqual(self.g.check_submission(self.state, dict(base, inputs=bad), self.root), [])
+        self.rewrite([dict(s, clip=f'reference/v001/{s["id"]}.mp4', stills=[f'reference/v001/{s["id"]}-start.png'])
+                      for s in self.shots()], rights='third_party')
+        for path in ('reference/v001/../v001/s01.mp4', 'reference/v001/s02-start.png'):
+            errors = self.g.check_submission(self.state, dict(base, inputs=[{'path': path}]), self.root)
+            self.assertEqual(errors, [f's01: job input {path} is third-party reference footage; record source.upload_agreed first'])
+        absolute = str(self.root / 'inputs/reference.mp4')
+        self.assertEqual(self.g.check_submission(self.state, dict(base, inputs=[{'path': absolute}]), self.root),
+                         [f's01: job input {absolute} is third-party reference footage; record source.upload_agreed first'])
+        self.rewrite(self.shots(), rights='third_party', upload_agreed='User: "ok to upload the reel as motion reference"')
+        self.assertEqual(self.g.check_submission(self.state, job, self.root), [])
 
     def shots(self):
         return json.loads((self.root / 'reference.json').read_text())['shots']
@@ -302,7 +424,7 @@ class GateReferenceTests(unittest.TestCase):
 
     def test_split_take_cannot_be_checked_without_a_limit(self):
         shots = self.shots(); shots[1].update(continues_previous=True, split_reason='web limit')
-        ref = {'version': 1, 'source': {'path': 'a', 'sha256': 'b'}, 'setup': SETUP, 'shots': shots}
+        ref = {'version': 1, 'source': {'path': 'a', 'sha256': 'b', 'rights': 'own'}, 'match': 'shot', 'setup': SETUP, 'shots': shots}
         self.assertEqual(self.g.check_reference(ref),
                          ['reference: a split take needs --max-duration (generation_profile.max_duration_s) to be checked'])
 

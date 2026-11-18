@@ -77,9 +77,22 @@ class PackTests(unittest.TestCase):
 
     def test_pack_requires_model_prompt_inputs(self):
         self.job['prompt'] = ''
-        with self.assertRaisesRegex(ValueError, 'job: model, prompt and inputs are required'):
+        with self.assertRaisesRegex(ValueError, 'job: model and prompt are required'):
             self.h.pack(self.job, self.root, self.out)
         self.assertFalse(self.out.exists())
+
+    def test_text_only_job_packs_without_inputs(self):
+        for n, inputs in enumerate(([], None)):
+            job = dict(self.job, inputs=inputs)
+            if inputs is None: del job['inputs']
+            out = self.root / f'handoff/text-{n}'
+            self.assertEqual(self.h.pack(job, self.root, out), [])
+            text = (out / 'request.md').read_text()
+            self.assertIn('No input files: text only.', text); self.assertNotIn('| file | slot | purpose |', text)
+            self.assertTrue((out / 'output').is_dir())
+        with self.assertRaisesRegex(ValueError, 'job: inputs must be a list'):
+            self.h.pack(dict(self.job, inputs='x'), self.root, self.root / 'handoff/bad')
+        self.assertFalse((self.root / 'handoff/bad').exists())
 
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')

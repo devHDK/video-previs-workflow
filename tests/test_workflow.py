@@ -139,7 +139,7 @@ class EditTests(unittest.TestCase):
             self.assertEqual((video['width'], video['height']), (810, 960))
 
     def test_every_media_subcommand_help_exits_zero(self):
-        for sub in ('probe', 'extract', 'encode', 'assemble', 'compare', 'pair', 'continuity', 'cuts'):
+        for sub in ('probe', 'extract', 'encode', 'assemble', 'compare', 'pair', 'continuity', 'cuts', 'sheet'):
             done = subprocess.run([sys.executable, str(SCRIPTS / 'media.py'), sub, '--help'], capture_output=True)
             self.assertEqual(done.returncode, 0, sub)
 
@@ -149,10 +149,43 @@ class CutTests(unittest.TestCase):
             {'id': 's01', 'start': 0, 'end': 1.5}, {'id': 's02', 'start': 1.5, 'end': 3.5},
             {'id': 's03', 'start': 3.5, 'end': 4.75}])
 
-    def test_parse_cut_times(self):
-        log = ('[Parsed_showinfo_2 @ 0x1] n:   0 pts:  45 pts_time:1.5     duration:1\n'
-               '[Parsed_showinfo_2 @ 0x1] n:   1 pts: 105 pts_time:3.5 duration:1\n')
-        self.assertEqual(module('media').parse_cut_times(log), [1.5, 3.5])
+    def test_merge_runs_keeps_the_strongest_of_each_run(self):
+        m = module('media'); c = lambda t, s: {'t': t, 'score': s}
+        self.assertEqual(m.merge_runs([]), [])
+        self.assertEqual(m.merge_runs([c(1.0, .2)]), [c(1.0, .2)])
+        run = [c(3.40, .12), c(3.45, .10), c(3.52, .15), c(3.57, .11)]
+        self.assertEqual(m.merge_runs(run + [c(5.0, .26)]), [dict(c(3.52, .15), **{'from': 3.4, 'to': 3.57}), c(5.0, .26)])
+        self.assertEqual(m.merge_runs([c(1.0, .2), c(1.1, .3), c(1.21, .1)]), [dict(c(1.1, .3), **{'from': 1.0, 'to': 1.1}), c(1.21, .1)])   # 0.1 apart joins, more does not
+        self.assertEqual(m.merge_runs([c(5.0, .2), c(1.0, .2)]), [c(1.0, .2), c(5.0, .2)])                       # sorted first, nothing dropped
+
+    def test_parse_scene_scores(self):
+        log = ('[Parsed_metadata_2 @ 0x1] frame:0    pts:45      pts_time:1.5\n'
+               '[Parsed_metadata_2 @ 0x1] lavfi.scene_score=0.412345\n'
+               '[Parsed_metadata_2 @ 0x1] frame:1    pts:105     pts_time:3.5\n'
+               '[Parsed_metadata_2 @ 0x1] lavfi.scene_score=0.180000\n')
+        self.assertEqual(module('media').parse_scene_scores(log), [(1.5, 0.412345), (3.5, 0.18)])
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+    def test_weak_scene_changes_become_candidates(self):
+        m, gate = module('media'), module('gate')
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / 'ref.mp4'
+            subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=0xFF0000:s=64x64:r=30:d=1',
+                            '-f', 'lavfi', '-i', 'color=c=0x990000:s=64x64:r=30:d=1',
+                            '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=30:d=1',
+                            '-f', 'lavfi', '-i', 'color=c=white:s=64x64:r=30:d=1', '-filter_complex',
+                            '[0][1][2][3]concat=n=4:v=1[v]', '-map', '[v]', '-pix_fmt', 'yuv420p', str(src)], check=True)
+            draft = m.cuts(src, Path(t) / 'a')  # measured scene scores: 0.26 at 1 s, 0.14 at 2 s, 1.0 at 3 s
+            self.assertEqual([(round(s['start'], 2), round(s['end'], 2)) for s in draft['shots']], [(0, 3.0), (3.0, 4.0)])
+            self.assertEqual(draft['candidates'], [{'t': 1.0, 'score': 0.26}])           # 0.14 is under the default floor of 0.2
+            self.assertEqual(m.cuts(src, Path(t) / 'a2', low=0.1)['candidates'], [{'t': 1.0, 'score': 0.26}, {'t': 2.0, 'score': 0.14}])
+            self.assertIn('reference: candidate cut at 1 s needs a decision', gate.check_reference(draft))
+            self.assertEqual(m.cuts(src, Path(t) / 'b', threshold=0.3, low=0.3)['candidates'], [])
+            still = Path(t) / 'still.mp4'
+            subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=64x64:r=30:d=1',
+                            '-pix_fmt', 'yuv420p', str(still)], check=True)
+            flat = m.cuts(still, Path(t) / 'c')
+            self.assertEqual((len(flat['shots']), flat['candidates']), (1, []))
 
     @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
     def test_cuts_writes_draft_frames_and_clips(self):
@@ -165,6 +198,8 @@ class CutTests(unittest.TestCase):
             draft = m.cuts(src, out)
             self.assertEqual([(round(s['start'], 2), round(s['end'], 2)) for s in draft['shots']], [(0, 1.0), (1.0, 2.0)])
             self.assertEqual(draft['source']['sha256'], hashlib.sha256(src.read_bytes()).hexdigest())
+            self.assertEqual((draft['source']['rights'], draft['match'], draft['candidates']), ('', '', []))
+            self.assertTrue(all(s['plan'] == {'source': '', 'what': '', 'caption': ''} for s in draft['shots']))
             for shot in draft['shots']:
                 for path in shot['stills'] + [shot['clip']]: self.assertTrue(Path(path).is_file(), path)
             self.assertEqual(json.loads((out / 'reference-draft.json').read_text()), draft)

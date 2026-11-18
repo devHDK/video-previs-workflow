@@ -169,8 +169,40 @@ def continuity(state_path, output):
     return [{'role': r['role'], 'shots': r['shots'], 'keyframe_sha256': r['keyframe_sha256']} for r in rows]
 
 
-def parse_cut_times(log):
-    return [float(t) for t in re.findall(r'pts_time:([0-9.]+)', log)]
+def sheet(images, output, cols=2, cell=(270, 480)):
+    """Still images tiled in cells, `cols` per row: a real frame beside a keyframe, or a mapping of planned frames.
+    Returns which image is in which cell; the picture itself carries no labels."""
+    images = [Path(i) for i in images]
+    if len(images) < 2: raise ValueError('sheet needs 2 or more images')
+    for image in images:
+        if not image.is_file(): raise ValueError(f'missing image {image}')
+    if cols < 1: raise ValueError('cols must be 1 or more')
+    if not (len(cell) == 2 and all(type(v) is int and v > 0 and v % 2 == 0 for v in cell)):
+        raise ValueError('cell must be WxH with positive even numbers')
+    w, h = cell
+    output = fresh_output(output)
+    with tempfile.TemporaryDirectory(prefix='video-sheet-') as temp:
+        for i, image in enumerate(images):
+            run(['ffmpeg', '-v', 'error', '-n', '-i', image, '-frames:v', '1',
+                 '-vf', f'scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2', Path(temp) / f'{i:04d}.png'])
+        run(['ffmpeg', '-v', 'error', '-n', '-i', Path(temp) / '%04d.png', '-frames:v', '1',
+             '-vf', f'tile={cols}x{-(-len(images) // cols)}', output])
+    return [{'row': i // cols + 1, 'col': i % cols + 1, 'path': str(image)} for i, image in enumerate(images)]
+
+
+def merge_runs(candidates, gap=0.1):
+    """A shaky shot scores as a run of candidates a frame or two apart: keep the strongest of each run."""
+    runs = []
+    for c in sorted(candidates, key=lambda c: c['t']):
+        if runs and c['t'] - runs[-1][-1]['t'] <= gap + 1e-9: runs[-1].append(c)
+        else: runs.append([c])
+    # a merged entry keeps the stretch it stands for: a real cut can hide inside a shaky run
+    return [dict(max(run, key=lambda c: c['score']), **({'from': run[0]['t'], 'to': run[-1]['t']} if len(run) > 1 else {})) for run in runs]
+
+
+def parse_scene_scores(log):
+    """(seconds, scene score) per frame that ffmpeg's metadata=print reported."""
+    return [(float(t), float(s)) for t, s in re.findall(r'pts_time:([0-9.]+)[^\n]*\n[^\n]*lavfi\.scene_score=([0-9.]+)', log)]
 
 
 def shots_from_cuts(cut_times, duration):
@@ -178,19 +210,21 @@ def shots_from_cuts(cut_times, duration):
     return [{'id': f's{i + 1:02d}', 'start': a, 'end': b} for i, (a, b) in enumerate(zip(bounds, bounds[1:]))]
 
 
-def cuts(source, output_dir, threshold=0.3):
+def cuts(source, output_dir, threshold=0.3, low=0.2):
     """Draft reference breakdown: detected cuts, start/mid/end frames and a clip per shot. Paths are kept as given,
-    so run it from the project directory. Detection is a proposal: dissolves, flashes and whip pans need review."""
+    so run it from the project directory. Detection is a proposal: dissolves, flashes and whip pans need review.
+    Scene changes scored between `low` and `threshold` are kept as `candidates` to be looked at, not cut on."""
     out = Path(output_dir)
     out.resolve().mkdir(parents=True, exist_ok=False)
     # ponytail: ffmpeg scene score only; swap in PySceneDetect if soft transitions dominate the references
     log = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', str(source), '-an', '-vf',
-                          f"setpts=PTS-STARTPTS,select='gt(scene,{threshold})',showinfo", '-f', 'null', '-'],
+                          f"setpts=PTS-STARTPTS,select='gt(scene,{min(low, threshold)})',metadata=print", '-f', 'null', '-'],
                          capture_output=True, text=True, check=True).stderr
     video = next(s for s in probe(source)['streams'] if s['codec_type'] == 'video')
     num, den = video['r_frame_rate'].split('/')
     duration = video_duration(source)
-    shots = shots_from_cuts(parse_cut_times(log), duration)
+    scores = [(t, s) for t, s in parse_scene_scores(log) if 0 < t < duration]
+    shots = shots_from_cuts([t for t, s in scores if s > threshold], duration)
     for shot in shots:
         start, end, sid = shot['start'], shot['end'], shot['id']
         d = min(0.05, (end - start) / 4)  # stay inside the shot: an exact cut time can return the neighbour frame
@@ -202,10 +236,11 @@ def cuts(source, output_dir, threshold=0.3):
         shot['clip'] = str(out / f'{sid}.mp4')
         run(['ffmpeg', '-v', 'error', '-n', '-ss', f'{start:.3f}', '-i', source, '-t', f'{end - start:.3f}', '-an',
              '-c:v', 'libx264', '-pix_fmt', 'yuv420p', shot['clip']])
-        shot.update(camera='', camera_evidence=[], action='', events=[])
+        shot.update(camera='', camera_evidence=[], action='', events=[], plan={'source': '', 'what': '', 'caption': ''})
     draft = {'version': 1, 'source': {'path': str(source), 'sha256': hashlib.sha256(Path(source).read_bytes()).hexdigest(),
-                                      'fps': int(num) / int(den), 'duration': duration},
-             'setup': dict.fromkeys(('premise', 'tone', 'avoid', 'lead', 'setting'), ''), 'shots': shots}
+                                      'fps': int(num) / int(den), 'duration': duration, 'rights': ''},
+             'match': '', 'setup': dict.fromkeys(('premise', 'tone', 'avoid', 'lead', 'setting'), ''),
+             'candidates': merge_runs([{'t': round(t, 3), 'score': round(s, 3)} for t, s in scores if s <= threshold]), 'shots': shots}
     (out / 'reference-draft.json').write_text(json.dumps(draft, indent=2))
     return draft
 
@@ -343,8 +378,11 @@ def main():
     q.add_argument('output'); q.add_argument('--points', type=int, default=5)
     q.add_argument('--times', help='comma-separated seconds applied to both sources, e.g. 0.24,7.4; replaces --points')
     q = sub.add_parser('continuity', help='keyframes per role shared by 2+ shots'); q.add_argument('state'); q.add_argument('output')
+    q = sub.add_parser('sheet', help='still images side by side'); q.add_argument('output'); q.add_argument('images', nargs='+')
+    q.add_argument('--cols', type=int, default=2); q.add_argument('--cell', default='270x480', help='WxH of one cell, e.g. 540x960 for review')
     q = sub.add_parser('cuts', help='draft reference breakdown from detected cuts'); q.add_argument('input')
     q.add_argument('output_dir'); q.add_argument('--threshold', type=float, default=0.3)
+    q.add_argument('--low', type=float, default=0.2, help='scene score above which a change is listed as a candidate cut')
     q = sub.add_parser('dupes', help='find frames repeated by an export; --fix writes a repaired copy'); q.add_argument('input'); q.add_argument('--fix')
     q = sub.add_parser('spread', help='how far apart the members of a group change state'); q.add_argument('input')
     q.add_argument('--start', type=float, required=True); q.add_argument('--end', type=float, required=True)
@@ -361,7 +399,10 @@ def main():
         print(json.dumps(spread(a.input, a.start, a.end, tuple(int(v) for v in a.grid.split('x')), a.crop)))
     elif a.action == 'reframe':
         reframe(a.input, a.output, tuple(int(v) for v in a.size.split('x')), a.crop_width, parse_centres(a.centres), a.fps)
-    elif a.action == 'cuts': print(json.dumps(cuts(a.input, a.output_dir, a.threshold), indent=2))
+    elif a.action == 'cuts': print(json.dumps(cuts(a.input, a.output_dir, a.threshold, a.low), indent=2))
+    elif a.action == 'sheet':
+        if not re.fullmatch(r'\d+x\d+', a.cell): raise ValueError('cell must be WxH with positive even numbers')
+        print(json.dumps(sheet(a.images, a.output, a.cols, tuple(int(v) for v in a.cell.split('x'))), indent=2))
     elif a.action == 'continuity': print(json.dumps(continuity(a.state, a.output), indent=2))
     elif a.action == 'pair':
         pair(a.top, a.bottom, a.output, a.points, [float(t) for t in a.times.split(',')] if a.times else None)

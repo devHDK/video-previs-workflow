@@ -123,6 +123,16 @@ class StateTests(unittest.TestCase):
         self.assertEqual(s['shots'], [{'id': 's01', 'frames': 48, 'props': {}}])
         self.assertEqual((s['reference']['approval'], s['reference']['sha256']), ('pending', hashlib.sha256(b'{}').hexdigest()))
 
+    def test_put_refuses_a_record_without_its_path(self):
+        before = self.path.read_bytes()
+        for section, data, message in (('reference', {'version': 1, 'shots': []}, 'reference: path required'),
+                                       ('story', {'purpose': 'p'}, 'story: path required'), ('previs', {'path': 'previs/v001'}, 'previs: spec_path required'),
+                                       ('reference', {'path': 7}, 'reference: path required')):
+            with self.assertRaisesRegex(ValueError, message): self.m.put(self.path, section, data)
+            self.assertEqual(self.path.read_bytes(), before)
+        self.m.put(self.path, 'previs', {'path': 'previs/v001', 'spec_path': 'scene.json'})
+        self.assertEqual(self.state()['previs']['approval'], 'pending')
+
     def test_put_budget_keeps_counters(self):
         self.paid(); self.m.put(self.path, 'budget', {'cap': 60, 'settled': 99, 'reserved': 99, 'attempts_used': 99})
         b = self.state()['budget']
@@ -157,6 +167,15 @@ class RecordTests(unittest.TestCase):
         a = self.state()['assets'][0]
         self.assertEqual((a['role_id'], a['version'], a['kind'], a['approval'], a['sha256'], a['working_path']),
                          ('hero', 'v001', 'character', 'pending', self.sha('hero-v001.png'), 'hero-v001.png'))
+
+    def test_asset_records_where_footage_came_from(self):
+        self.m.asset(self.path, 'hero@v001', 'character', 'hero-v001.png')
+        self.m.asset(self.path, 'room@v001', 'set', 'hero-v001.png', source='footage', origin='IMG_0549 0.5 s, top 30 %')
+        plain, room = self.state()['assets'][-2:]
+        self.assertEqual((plain['source'], 'origin' in plain), ('generated', False))
+        self.assertEqual((room['source'], room['origin']), ('footage', 'IMG_0549 0.5 s, top 30 %'))
+        with self.assertRaisesRegex(ValueError, 'source must be generated, existing or footage'):
+            self.m.asset(self.path, 'x@v001', 'set', 'hero-v001.png', source='stock')
 
     def test_asset_rejects_bad_kind_missing_file_and_duplicate(self):
         with self.assertRaisesRegex(ValueError, 'kind'): self.m.asset(self.path, 'hero@v001', 'person', 'hero-v001.png')

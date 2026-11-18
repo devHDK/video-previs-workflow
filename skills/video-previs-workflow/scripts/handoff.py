@@ -25,9 +25,9 @@ def slug(text):
 def pack(job, root, out_dir):
     """Copy inputs to OUT_DIR/NN-<slot>.<ext>, write request.md and an empty output/. Validates before writing."""
     root, out_dir = Path(root), Path(out_dir)
-    inputs = job.get('inputs') if isinstance(job, dict) else None
-    if not (isinstance(inputs, list) and inputs and job.get('model') and job.get('prompt')):
-        raise ValueError('job: model, prompt and inputs are required')
+    if not (isinstance(job, dict) and job.get('model') and job.get('prompt')): raise ValueError('job: model and prompt are required')
+    inputs = job.get('inputs', [])  # a text-only request has none
+    if not isinstance(inputs, list): raise ValueError('job: inputs must be a list')
     if out_dir.exists(): raise FileExistsError(f'Choose a new pack folder: {out_dir}')
     sources = []
     for item in inputs:
@@ -45,7 +45,7 @@ def pack(job, root, out_dir):
     lines = [f"# {job.get('provider', 'Provider')} — {job['model']}", '',
              'Generate this by hand in the provider web app. Do not automate the web app.', '', '## Settings', '',
              *[f'- {k}: {v}' for k, v in (job.get('settings') or {}).items()], '', '## Inputs (upload in this order)', '',
-             '| file | slot | purpose |', '|---|---|---|', *rows, '', '## Prompt', '', '```text', job['prompt'], '```', '',
+             *(['| file | slot | purpose |', '|---|---|---|', *rows] if rows else ['No input files: text only.']), '', '## Prompt', '', '```text', job['prompt'], '```', '',
              'After pasting, check that every reference tag in the prompt links to its uploaded file: a tag left as plain text '
              'means the model never sees that input. Note how many images and videos the app accepted.', '',
              '## Result', '', f"Expected: {output.get('kind', 'file')}. {output.get('notes', '')}".rstrip(),

@@ -117,5 +117,34 @@ class CliTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
+
+@unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+class SheetTests(unittest.TestCase):
+    def size(self, path):
+        video = next(s for s in media.probe(path)['streams'] if s['codec_type'] == 'video')
+        return video['width'], video['height']
+
+    def test_images_tile_in_rows_and_bad_input_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t); images = []
+            for i, colour in enumerate(('red', 'green', 'blue')):
+                images.append(root / f'{i}.png')
+                subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'color=c={colour}:s=90x160', '-frames:v', '1',
+                                str(images[-1])], check=True)
+            legend = media.sheet(images, root / 'out/sheet.jpg')
+            self.assertEqual(legend, [{'row': 1, 'col': 1, 'path': str(images[0])}, {'row': 1, 'col': 2, 'path': str(images[1])},
+                                      {'row': 2, 'col': 1, 'path': str(images[2])}])
+            media.sheet(images, root / 'big.jpg', cols=3, cell=(540, 960))
+            self.assertEqual(self.size(root / 'big.jpg'), (1620, 960))
+            with self.assertRaisesRegex(ValueError, 'cell must be WxH with positive even numbers'): media.sheet(images, root / 'bad.jpg', cell=(0, 10))
+            self.assertFalse((root / 'bad.jpg').exists())
+            self.assertEqual(self.size(root / 'out/sheet.jpg'), (540, 960))          # 2 columns, 2 rows
+            media.sheet(images, root / 'wide.jpg', cols=3)
+            self.assertEqual(self.size(root / 'wide.jpg'), (810, 480))
+            with self.assertRaises(FileExistsError): media.sheet(images, root / 'wide.jpg')
+            with self.assertRaisesRegex(ValueError, 'sheet needs 2 or more images'): media.sheet(images[:1], root / 'one.jpg')
+            with self.assertRaisesRegex(ValueError, 'missing image'): media.sheet(images + [root / 'no.png'], root / 'gone.jpg')
+            self.assertFalse((root / 'one.jpg').exists() or (root / 'gone.jpg').exists())
+
 if __name__ == '__main__':
     unittest.main()
