@@ -100,9 +100,11 @@ class GateProjectTests(unittest.TestCase):
         self.assertEqual(self.errors(), ['s02: 31.0 s exceeds generation_profile.max_duration_s 30'])
         job = {'shot': 's02', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
         self.assertEqual(self.g.check_submission(self.state, job, self.root), ['job: take of 31.0 s exceeds generation_profile.max_duration_s 30'])
-        for bad in (None, 0, '24'):
+        for bad in (12.5, 12.0, None, 0, -1, True, '24'):
             shot['frames'] = bad
-            self.assertEqual(self.errors(), ['s02: frames required for a shot without previs'])
+            expected = ['s02: frames must be a positive integer for a shot without previs']
+            self.assertEqual(self.errors(), expected)
+            self.assertEqual(self.g.check_submission(self.state, job, self.root), expected)
 
     def test_legacy_state_reports_without_raising(self):
         self.state = {'previs': {'spec_path': 'scene.json', 'approval': 'approved'},

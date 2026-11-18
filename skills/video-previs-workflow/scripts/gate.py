@@ -177,7 +177,8 @@ def shot_errors(state, shot, objects, root, spec_ok=True):
     unblocked = objects is None and _text(shot.get('no_previs'))
     if spec_ok and objects is not None and _text(shot.get('no_previs')): errors.append(f'{sid}: no_previs is set but the shot is in the previs spec')
     elif objects is None and not _text(shot.get('no_previs')): errors.append(f'{sid}: shot not found in previs spec')
-    elif objects is None and not _positive(shot.get('frames')): errors.append(f'{sid}: frames required for a shot without previs')
+    elif objects is None and (type(shot.get('frames')) is not int or shot['frames'] <= 0):
+        errors.append(f'{sid}: frames must be a positive integer for a shot without previs')
     objects = objects or []
     if unblocked and not isinstance(shot.get('object_roles'), dict):  # with no spec objects to map, the roles in frame must be stated
         errors.append(f'{sid}: object_roles required for a shot without previs (name what is in the frame, or {{}})')
