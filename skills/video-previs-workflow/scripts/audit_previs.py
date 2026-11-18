@@ -1,4 +1,9 @@
 """Sampled Blender geometry checks; not a generated-video quality score."""
+import math
+from motion import object_at, camera_at
+
+LINE_NEUTRAL = 0.1  # sine of the angle to the action line under which a camera counts as on it (about 6 degrees)
+SCREEN_MIN = 0.5    # metres of net sideways travel before a figure has a screen direction
 
 def framing_issues(points, margin=0, crop_ok=False):
     issues = []
@@ -18,6 +23,66 @@ def contact_issue(bottom, ground, tolerance, frame, windows):
     if bottom < ground - tolerance: return 'penetrating_ground'
     if bottom > ground + tolerance: return 'floating'
     return None
+
+
+def _ground(shot, object_id, frame):
+    return object_at(next(o for o in shot['objects'] if o['id'] == object_id), frame)['position'][:2]
+
+
+def line_side(shot, frame):
+    """Which side of the audit.line pair the camera stands on at this frame: 1, -1, or 0 when it is on the line."""
+    a, b = (_ground(shot, i, frame) for i in sorted(shot['audit']['line']))
+    c = camera_at(shot, frame)['position']
+    along = (b[0] - a[0], b[1] - a[1])
+    out = (c[0] - (a[0] + b[0]) / 2, c[1] - (a[1] + b[1]) / 2)
+    lengths = math.hypot(*along) * math.hypot(*out)
+    if lengths < 1e-6: return 0
+    sine = (along[0] * out[1] - along[1] * out[0]) / lengths
+    return 0 if abs(sine) < LINE_NEUTRAL else 1 if sine > 0 else -1
+
+
+def screen_travel(shot, object_id):
+    """Net metres the object's root moves toward screen right over the shot, on the ground plane."""
+    total, before = 0.0, _ground(shot, object_id, 1)
+    for frame in range(2, shot['frames'] + 1):
+        here, camera = _ground(shot, object_id, frame), camera_at(shot, frame)
+        forward = (camera['target'][0] - camera['position'][0], camera['target'][1] - camera['position'][1])
+        length = math.hypot(*forward)
+        if length >= 1e-6:
+            total += ((here[0] - before[0]) * forward[1] - (here[1] - before[1]) * forward[0]) / length
+        before = here
+    return total
+
+
+def staging_findings(spec):
+    """Action line and screen direction per shot id, read from the whole spec; shots that declare neither are absent."""
+    result, previous = {}, None
+    for shot in spec['shots']:
+        audit = shot.get('audit', {})
+        checks, findings = [], []
+        if 'line' in audit:
+            checks.append('action_line')
+            if previous is not None and set(previous.get('audit', {}).get('line', [])) == set(audit['line']) \
+                    and audit.get('line_cross_ok') is not True:
+                sides = line_side(previous, previous['frames']), line_side(shot, 1)
+                if 0 not in sides and sides[0] != sides[1]:
+                    findings.append({'frame': 1, 'object': 'camera', 'issues': ['line_crossed']})
+        if 'screen_direction' in audit:
+            checks.append('screen_direction')
+            for object_id, want in audit['screen_direction'].items():
+                metres = screen_travel(shot, object_id)
+                if abs(metres) >= SCREEN_MIN and (metres > 0) != (want == 'right'):
+                    findings.append({'frame': shot['frames'], 'object': object_id, 'issues': ['screen_direction_reversed']})
+        if checks: result[shot['id']] = {'checks': checks, 'findings': findings}
+        previous = shot
+    return result
+
+
+def merge_staging(audit, staging):
+    """The shot's audit with its staging checks added; unchanged when the shot declares none."""
+    if staging is None: return audit
+    checks, findings = audit['checks'] + staging['checks'], audit['findings'] + staging['findings']
+    return dict(audit, checks=checks, findings=findings, status='issues' if findings else 'passed_sampled_checks')
 
 
 def audit_scene(scene, shot, objects):

@@ -1,5 +1,5 @@
-"""Background-only Blender renderer: -- SPEC NEW_OUTPUT_DIR [--review-only] [--frames 1,24] [--size WxH] [--shot ID] [--audit-only].
-Writes per-shot .blend, audit.json, handoff.json, review stills and optionally full PNG sequences.
+"""Background-only Blender renderer: -- SPEC NEW_OUTPUT_DIR [--review-only] [--frames 1,24] [--size WxH] [--shot ID] [--audit-only] [--plan ID,ID].
+Writes per-shot .blend, audit.json, handoff.json, review stills and optionally full PNG sequences; --plan writes only a floor plan.
 """
 import argparse
 import json
@@ -10,7 +10,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_spec import validate
 from motion import object_at, camera_at
-from audit_previs import audit_scene
+from audit_previs import audit_scene, staging_findings, merge_staging
+from floor_plan import plan_layout, render_plan
 
 
 def capsule_mesh(bpy):
@@ -127,6 +128,7 @@ def main():
     p.add_argument('--size', help='WxH for this run, e.g. 1080x1920 for keyframe guides')
     p.add_argument('--shot', help='render only this shot id')
     p.add_argument('--audit-only', action='store_true', help='write audit.json per shot; render nothing')
+    p.add_argument('--plan', help='comma-separated shot ids sharing one location: write plan.png and plan.json only')
     options = p.parse_args(args)
     spec = json.loads(options.spec.read_text()); errors = validate(spec)
     if errors: raise SystemExit('\n'.join(errors))
@@ -135,17 +137,29 @@ def main():
     picked = [int(f) for f in options.frames.split(',')] if options.frames else None
     shots = pick_shots(spec, options.shot)
     stills = {shot['id']: stills_for(shot, picked) for shot in shots}
+    layout = None
+    if options.plan is not None:
+        if options.frames or options.size or options.shot or options.review_only or options.audit_only:
+            raise ValueError('--plan renders only the floor plan; remove --frames, --size, --shot, --review-only and --audit-only')
+        layout = plan_layout(spec, options.plan.split(','))
+    staging = staging_findings(spec)
     starts, position = {}, 0
     for shot in spec['shots']: starts[shot['id']] = position; position += shot['frames']
     import bpy
     if not bpy.app.background:
         raise RuntimeError('Use a separate --background Blender process; this renderer resets its own scene.')
     output = options.output.resolve(); output.mkdir(parents=True, exist_ok=False)
+    if layout:
+        scene, _ = build_shot(bpy, spec, pick_shots(spec, layout['shots'][0]['id'])[0])
+        render_plan(bpy, scene, layout, output / 'plan.png')
+        (output / 'plan.json').write_text(json.dumps(layout, indent=2))
+        print(f'Floor plan saved: {output}/plan.png; inspect it before using it in a review.')
+        return
     summary = []
     for shot in shots:
         scene, objects = build_shot(bpy, spec, shot)
         folder = output / shot['id']; folder.mkdir()
-        audit = audit_scene(scene, shot, objects)
+        audit = merge_staging(audit_scene(scene, shot, objects), staging.get(shot['id']))
         (folder / 'audit.json').write_text(json.dumps(audit, indent=2))
         if options.audit_only:
             print(json.dumps({'shot': shot['id'], 'status': audit['status'], 'findings': len(audit['findings'])}))

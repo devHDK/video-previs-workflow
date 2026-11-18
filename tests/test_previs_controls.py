@@ -134,4 +134,117 @@ class RenderOptionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unknown shot s09'):
             self.m.pick_shots(spec, 's09')
 
+def duel(cam2=(2, -5, 1.6), **audit2):
+    """Two figures on the x axis, s01 seen from -y, s02 from cam2."""
+    def fig(i, x): return {'id': i, 'shape': 'capsule', 'color': [.5, .5, .5], 'scale': [1, 1, 1],
+                           'keys': [{'frame': 1, 'position': [x, 0, 0]}]}
+    def shot(sid, cam, audit): return {'id': sid, 'frames': 24, 'camera': {'position': list(cam), 'target': [0, 0, 1]},
+                                       'objects': [fig('a', -1), fig('b', 1)], 'audit': audit}
+    return {'version': 1, 'fps': 24, 'width': 360, 'height': 640,
+            'shots': [shot('s01', (0, -6, 1.6), {'line': ['a', 'b']}),
+                      shot('s02', cam2, dict({'line': ['a', 'b']}, **audit2))]}
+
+CROSSED = [{'frame': 1, 'object': 'camera', 'issues': ['line_crossed']}]
+
+
+class StagingTests(unittest.TestCase):
+    def setUp(self): self.m = module('audit_previs'); self.v = module('validate_spec')
+
+    def found(self, spec, sid='s02'): return self.m.staging_findings(spec)[sid]['findings']
+
+    def test_same_side_passes_and_names_the_check(self):
+        spec = duel(); self.assertEqual(self.v.validate(spec), [])
+        self.assertEqual(self.m.staging_findings(spec),
+                         {'s01': {'checks': ['action_line'], 'findings': []},
+                          's02': {'checks': ['action_line'], 'findings': []}})
+
+    def test_cut_to_the_far_side_is_reported_on_the_later_shot(self):
+        spec = duel((2, 5, 1.6))
+        self.assertEqual(self.found(spec), CROSSED)
+        self.assertEqual(self.found(spec, 's01'), [])
+
+    def test_pair_order_does_not_matter(self):
+        spec = duel(); spec['shots'][1]['audit']['line'] = ['b', 'a']
+        self.assertEqual(self.found(spec), [])
+        spec = duel((2, 5, 1.6)); spec['shots'][1]['audit']['line'] = ['b', 'a']
+        self.assertEqual(self.found(spec), CROSSED)
+
+    def test_recorded_crossing_and_camera_on_the_line_are_not_reported(self):
+        self.assertEqual(self.found(duel((2, 5, 1.6), line_cross_ok=True)), [])
+        self.assertEqual(self.m.line_side(duel((-6, 0.2, 1.6))['shots'][1], 1), 0)
+        self.assertEqual(self.found(duel((-6, 0.2, 1.6))), [])
+
+    def test_only_the_previous_shot_with_the_same_pair_counts(self):
+        spec = duel((2, 5, 1.6)); spec['shots'][1]['objects'].append(
+            dict(spec['shots'][1]['objects'][1], id='c')); spec['shots'][1]['audit']['line'] = ['a', 'c']
+        self.assertEqual(self.found(spec), [])
+        spec = duel((2, 5, 1.6)); cutaway = copy.deepcopy(spec['shots'][0]); cutaway.update(id='s01b', audit={})
+        spec['shots'].insert(1, cutaway)
+        self.assertEqual(self.found(spec), [])
+        self.assertNotIn('s01b', self.m.staging_findings(spec))
+
+    def test_side_is_read_at_the_frames_either_side_of_the_cut(self):
+        spec = duel((2, 5, 1.6))
+        spec['shots'][0]['camera']['keys'] = [{'frame': 1, 'position': [0, -6, 1.6]}, {'frame': 24, 'position': [3, 6, 1.6]}]
+        self.assertEqual(self.v.validate(spec), [])
+        self.assertEqual((self.m.line_side(spec['shots'][0], 1), self.m.line_side(spec['shots'][0], 24)), (-1, 1))
+        self.assertEqual(self.found(spec), [])
+
+    def test_screen_travel_is_signed_by_the_camera_side(self):
+        shot = scene()['shots'][0]                      # hero walks 2 m along +x, camera at [6, -8, 5]
+        self.assertAlmostEqual(self.m.screen_travel(shot, 'hero'), 1.6, places=6)
+        shot['camera']['position'] = [6, 8, 5]
+        self.assertAlmostEqual(self.m.screen_travel(shot, 'hero'), -1.6, places=6)
+
+    def test_reversed_screen_direction_is_reported_at_the_last_frame(self):
+        spec = scene(); spec['shots'][0]['audit'] = {'screen_direction': {'hero': 'left'}}
+        self.assertEqual(self.v.validate(spec), [])
+        self.assertEqual(self.m.staging_findings(spec), {'s01': {'checks': ['screen_direction'], 'findings': [
+            {'frame': 48, 'object': 'hero', 'issues': ['screen_direction_reversed']}]}})
+        spec['shots'][0]['audit'] = {'screen_direction': {'hero': 'right'}}
+        self.assertEqual(self.found(spec, 's01'), [])
+
+    def test_travel_toward_the_camera_is_neither_left_nor_right(self):
+        for want in ('left', 'right'):
+            spec = scene(); shot = spec['shots'][0]
+            shot['camera'] = {'position': [0, -8, 5], 'target': [0, 0, 1]}
+            shot['objects'][0]['keys'] = [{'frame': 1, 'position': [0, 2, 1]}, {'frame': 48, 'position': [0, -2, 1]}]
+            shot['audit'] = {'screen_direction': {'hero': want}}
+            self.assertEqual(self.found(spec, 's01'), [])
+
+    def test_follow_camera_and_top_down_camera(self):
+        shot = scene()['shots'][0]; shot['camera'] = {'position': [0, -8, 3], 'follow': 'hero'}
+        self.assertGreater(self.m.screen_travel(shot, 'hero'), 1.5)
+        spec = duel((0, 0, 10)); top = spec['shots'][1]; top['camera']['target'] = [0, 0, 0]
+        top['audit']['screen_direction'] = {'a': 'right'}
+        self.assertEqual(self.m.screen_travel(top, 'a'), 0.0)
+        self.assertEqual(self.m.line_side(top, 1), 0)
+        self.assertEqual(self.found(spec), [])
+
+    def test_spec_without_the_new_keys_has_no_staging(self):
+        self.assertEqual(self.m.staging_findings(scene()), {})
+
+    def test_merge_keeps_the_audit_shape_and_recomputes_status(self):
+        base = {'shot': 's01', 'checks': [], 'findings': [], 'status': 'not_configured'}
+        self.assertEqual(self.m.merge_staging(base, None), base)
+        self.assertEqual(self.m.merge_staging(base, {'checks': ['action_line'], 'findings': []})['status'], 'passed_sampled_checks')
+        merged = self.m.merge_staging(dict(base, checks=['framing_bounds'], status='passed_sampled_checks'),
+                                      {'checks': ['action_line'], 'findings': CROSSED})
+        self.assertEqual((merged['checks'], merged['findings'], merged['status']),
+                         (['framing_bounds', 'action_line'], CROSSED, 'issues'))
+        self.assertEqual(base['checks'], [])            # the input is not edited
+
+    def test_rejects_malformed_staging_settings(self):
+        for audit, message in (({'line': ['a']}, 's02: audit line must be two different object ids'),
+                               ({'line': ['a', 'a']}, 's02: audit line must be two different object ids'),
+                               ({'line': ['a', 'zz']}, 's02: audit line must be two different object ids'),
+                               ({'line': 'ab'}, 's02: audit line must be two different object ids'),
+                               ({'line': None}, 's02: audit line must be two different object ids'),
+                               ({'line_cross_ok': 'yes'}, 's02: audit line_cross_ok must be true or false'),
+                               ({'screen_direction': {'a': 'up'}}, 's02: audit screen_direction must map object ids to left or right'),
+                               ({'screen_direction': {'zz': 'left'}}, 's02: audit screen_direction must map object ids to left or right'),
+                               ({'screen_direction': ['a']}, 's02: audit screen_direction must map object ids to left or right')):
+            spec = duel(); spec['shots'][1]['audit'] = audit
+            self.assertEqual(self.v.validate(spec), [message], audit)
+
 if __name__ == '__main__': unittest.main()

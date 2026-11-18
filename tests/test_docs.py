@@ -43,8 +43,16 @@ class DocTests(unittest.TestCase):
                      'kind `reference`', '--status cancelled', 'group_motion', 'spread_s', 'measured_s', 'unlisted_motion',
                      '`travel`', 'event_results', 'gate.py qa', 'media.py dupes', 'media.py spread', 'media.py reframe',
                      'state.py asset', 'state.py keyframe', 'state.py note', 'state.py bind',
-                     'state.py init', 'state.py put', 'state.py charge', 'prop_results', '`count`', '`states`'):
+                     'state.py init', 'state.py put', 'state.py charge', 'prop_results', '`count`', '`states`',
+                     'audit.line', 'line_cross_ok', 'screen_direction', 'line_crossed', 'screen_direction_reversed', '--plan', 'plan.png', 'sensor height', 'Floor plan'):
             self.assertTrue(name in refs, f'{name} is not documented in references/')
+
+    def test_shot_design_is_scoped_to_the_idea_led_route(self):
+        text = (SKILLS / 'video-previs-workflow/references/production.md').read_text()
+        section = text.split('## Shot design')[1].split('\n## ')[0]
+        for name in ('reference-led', '`audit.subjects`', '`audit.line`', '`line_cross_ok`', '`audit.screen_direction`', '36 mm'):
+            self.assertIn(name, section)
+        self.assertIn('--plan', (SKILLS / 'video-previs-workflow/SKILL.md').read_text())
 
     def test_skill_md_stays_compact(self):
         self.assertLessEqual(len((SKILLS / 'video-previs-workflow/SKILL.md').read_bytes()), 6500)

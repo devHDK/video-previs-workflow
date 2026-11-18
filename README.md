@@ -65,6 +65,7 @@ Codex에서는 `$video-previs-workflow`, Claude Code에서는 `/video-previs-wor
 - 생성 조건 기록: 모델의 최대 길이·길이 단위·참고 칸 수를 먼저 적고, 끊기지 않는 장면이 최대 길이 이내면 한 테이크로 만듭니다. 사유 없이 나눈 테이크와 한도를 넘는 샷은 게이트가 막습니다.
 - 검토 결함 기록: 외형·키프레임 검토에서 적은 결함은 '고침' 또는 '사용자 수용'으로 닫아야 승인됩니다. 소품은 어디서 나와 누가 들고 어디로 가는지 적어야 합니다.
 - 프리비즈 반복 단축: 이벤트 프레임 정지컷만 렌더(`--frames`), 렌더 없는 사전 검사(`--audit-only`), 지정 시점 비교 시트(`pair --times`)로 맞춘 뒤 전체 렌더는 한 번만 합니다.
+- 샷 설계와 연출 검사: 아이디어에서 출발하는 경로의 샷 설계 규칙(눈높이 기본, 샷 크기별 카메라 거리, 액션 라인, 화면 방향)과, 컷에서 액션 라인을 넘거나 화면 진행 방향이 뒤집힌 샷을 알려 주는 감사 항목, 여러 샷이 한 공간을 쓸 때의 평면도(`--plan`).
 - 키프레임 연속성: 여러 샷에 나오는 역할마다 키프레임을 한 줄로 모은 시트를 만들고, 승인 해시가 현재 키프레임과 일치해야 게이트를 통과.
 - 유료 생성 게이트: 프로젝트 준비 상태, 작업별 견적·상한·재시도 예비분, 같은 장소의 연속 샷을 한 테이크로 묶는 시퀀스 작업 검사.
 - 수동 웹 생성 경로: 웹 전용 요금제(예: Higgsfield Unlimited)를 쓸 때 업로드 순서대로 입력과 `request.md`를 묶고, 사람이 떨어뜨린 결과 하나를 디코드·해시 확인 후 반입. 웹 앱 자동화는 하지 않습니다.
@@ -77,7 +78,7 @@ Codex에서는 `$video-previs-workflow`, Claude Code에서는 `/video-previs-wor
 | `story-design/scripts/check_story.py` | 스토리 설계서 구조 검사 |
 | `video-previs-workflow/scripts/doctor.py` | Python·Blender·FFmpeg 사용 가능 여부 |
 | `validate_spec.py` | 장면 명세 검사, 이전 버전 대비 변경 샷 식별 |
-| `render_previs.py` | Blender 백그라운드 프리비즈 렌더·지오메트리 감사. `--frames` `--size` `--shot` `--audit-only` |
+| `render_previs.py` | Blender 백그라운드 프리비즈 렌더·지오메트리 감사. `--frames` `--size` `--shot` `--audit-only` `--plan` |
 | `blocking.py` | 프로젝트 장면 스크립트용 도우미: 초→프레임, 궤적, 몸 기준 위치, 얼굴 표시가 달린 사람 프록시 |
 | `media.py` | `probe` `extract` `encode` `assemble` `compare` `pair`(`--points`, `--times`) `continuity` `cuts` |
 | `gate.py` | `reference`(`--max-duration`) `ready` `submit`: 상황 설정서·생성 조건·테이크 길이·소품 출처·검토 결함까지 검사 (상태를 읽기만 하고 수정하지 않음) |
@@ -104,3 +105,5 @@ python3 skills/story-design/scripts/check_story.py skills/story-design/assets/ex
 ## 라이선스
 
 [MIT](LICENSE)
+
+샷 설계 규칙은 scenario-labs/skills의 `scenario-blender-previs-storyboard`(MIT)를 참고해 이 스킬의 형식에 맞게 다시 썼습니다. 코드는 가져오지 않았습니다.

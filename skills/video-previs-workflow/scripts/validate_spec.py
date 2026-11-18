@@ -104,6 +104,12 @@ def validate(spec):
         groups = audit.get('groups', [])
         need(isinstance(groups, list) and all(known(g) for g in groups), f'{sid}: audit groups must be lists of object ids')
         need(known(audit.get('crop_ok', [])), f'{sid}: audit crop_ok must list object ids')
+        line = audit.get('line', [0, 1])
+        need('line' not in audit or (known(line) and len(set(line)) == 2 == len(line)), f'{sid}: audit line must be two different object ids')
+        need(type(audit.get('line_cross_ok', False)) is bool, f'{sid}: audit line_cross_ok must be true or false')
+        direction = audit.get('screen_direction', {})
+        need(isinstance(direction, dict) and all(isinstance(k, str) and k in ids and v in ('left', 'right') for k, v in direction.items()),
+             f'{sid}: audit screen_direction must map object ids to left or right')
         review = shot.get('review_frames', [])
         need(isinstance(review, list) and all(integer(f) and integer(n) and f <= n for f in review),
              f'{sid}: review_frames must be integers within 1..frames')

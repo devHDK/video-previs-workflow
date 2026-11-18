@@ -7,6 +7,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
+from test_previs_controls import duel
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / 'skills/video-previs-workflow'
@@ -79,5 +80,48 @@ class BlenderRuntimeTests(unittest.TestCase):
             checked = subprocess.run([BINARY, '--background', str(folder / 'scene.blend'),
                  '--python-exit-code', '1', '--python', str(verify)], capture_output=True, text=True, timeout=60)
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+    def test_line_check_sees_the_previous_shot_when_one_shot_is_picked(self):
+        with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
+            root = Path(temp); output = root / 'result'; source = root / 'scene.json'
+            source.write_text(json.dumps(duel((2, 5, 1.6))))
+            result = render(source, output, '--audit-only', '--shot', 's02')
+            self.assertEqual(result.returncode, 0, result.stdout[-4000:] + result.stderr[-4000:])
+            audit = json.loads((output / 's02/audit.json').read_text())
+            self.assertIn({'frame': 1, 'object': 'camera', 'issues': ['line_crossed']}, audit['findings'])
+            self.assertIn('action_line', audit['checks'])
+            self.assertEqual(audit['status'], 'issues')
+            self.assertFalse((output / 's01').exists())
+
+    def plan(self, root, name, spec, *flags):
+        source = root / (name + '.json'); source.write_text(json.dumps(spec))
+        return render(source, root / name, *flags), root / name
+
+    def test_plan_writes_one_image_and_its_layout(self):
+        with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
+            root = Path(temp)
+            result, output = self.plan(root, 'still', duel((2, 5, 1.6)), '--plan', 's01,s02')
+            self.assertEqual(result.returncode, 0, result.stdout[-4000:] + result.stderr[-4000:])
+            self.assertEqual(sorted(p.name for p in output.rglob('*') if p.is_file()), ['plan.json', 'plan.png'])
+            self.assertEqual(struct.unpack('>II', (output / 'plan.png').read_bytes()[16:24]), (1080, 1080))
+            self.assertEqual([s['id'] for s in json.loads((output / 'plan.json').read_text())['shots']], ['s01', 's02'])
+            moving = duel((2, 5, 1.6)); moving['shots'][1]['objects'][0]['keys'] = [
+                {'frame': 1, 'position': [-1, 0, 0]}, {'frame': 24, 'position': [-1, -3, 0]}]
+            result, walked = self.plan(root, 'walk', moving, '--plan', 's01,s02')
+            self.assertEqual(result.returncode, 0, result.stdout[-4000:] + result.stderr[-4000:])
+            self.assertNotEqual((walked / 'plan.png').read_bytes(), (output / 'plan.png').read_bytes())
+
+    def test_plan_option_errors_leave_no_output_dir(self):
+        with tempfile.TemporaryDirectory(prefix='previs-runtime-') as temp:
+            root = Path(temp)
+            for name, flags, message in (
+                    ('unknown', ('--plan', 's09'), 'unknown shot s09'),
+                    ('empty', ('--plan', ''), 'unknown shot '),
+                    ('mixed', ('--plan', 's01', '--frames', '1'),
+                     '--plan renders only the floor plan; remove --frames, --size, --shot, --review-only and --audit-only')):
+                result, output = self.plan(root, name, duel(), *flags)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stdout + result.stderr)
+                self.assertFalse(output.exists())
 
 if __name__ == '__main__': unittest.main()

@@ -36,6 +36,18 @@ A storyboard panel may be a start, middle or end of one shot; do not equate pane
 
 Record for each shot: ID, duration in frames, subject IDs, setting, camera, start state, action, end state, required events with target frame windows, dialogue, sound cues and continuity constraints. Put voice timing into previs: measure scratch/approved voice duration and recheck timing when it changes. Scratch voice can be local or user-provided; paid scratch work needs the budget first.
 
+## Shot design
+
+Applies when shots are designed from an idea, a script or story beats. On the reference-led route the reference decides camera and cuts: skip this section.
+
+- Beats before shots: list what the viewer must learn, one fact per line, from the story beats' `event`s. Group consecutive facts into shots. A fact no shot shows is a defect. Fewer shots is the default: every cut costs the viewer reading time, and inside one location it is also a continuity risk (sequence takes, generation.md).
+- Neutral camera first: the subject's eye height, lens 40 mm, static. With two figures, a height between their eyes. Every departure (low, high, wide, long, a move) carries its reason in the shot's camera record ("low: he looms over her"); one without a reason goes back to neutral.
+- One thing to find after each cut: name the shot's focal subject, list it first in `audit.subjects` and keep competing subjects and occluders off it in the first frame.
+- Shot size sets the distance. Visible height = subject height × 2 (wide), 1.15 (full), 0.6 (medium), 0.4 (medium close-up) or 0.25 (close-up). Camera distance = visible height × lens ÷ sensor height, where sensor height is 36 mm for a frame taller than wide and 36 × height ÷ width otherwise (20.25 mm at 16:9). A lens change at the same size moves the camera: d2 = d1 × f2 ÷ f1.
+- Action line: when two figures face or address each other, every camera in that location stays on one side of the line through them, so each keeps its side of the screen. Declare the pair as `audit.line` in each of those shots. A crossing on purpose is a decision for the user; record it and set `line_cross_ok`.
+- Screen direction: a figure on a journey keeps travelling the same way across the screen from shot to shot, and the way back reverses it. Declare it as `audit.screen_direction` in each shot of the journey.
+- Move the camera only when the move is the point of the shot (a reveal, a follow, a push onto the detail that matters).
+
 ## Previs review
 
 Use simple geometry sufficient to expose composition, scale, occlusion, movement and contact. A jump requires takeoff, airborne arc and landing; rigid sliding blocks may be inadequate. Add proxy parts or custom Blender logic when needed. The bundled renderer supports primitive/capsule transforms, camera paths, target tracking and lens keys, with sampled geometry audits. It is not a full rigging system. Preserve its limitations in the review notes.
@@ -48,6 +60,8 @@ Proxy minimums:
 - In the delivery aspect ratio, no ground edge or empty void is visible inside the frame unless intended.
 - Every proxy object id is mapped in the shot's `object_roles` to a role or to `null` (set dressing without its own asset).
 - A prop's whole path is blocked and named in the shot's `props`: where it comes from (`origin`), who holds it (`holder`) and where it ends (`exit`). Hiding a proxy inside another proxy until it is needed is a staging trick, so record the real source (a pocket, a table) there. A prop with no stated source appears from nowhere in the generated take. Also record its `count` (how many exist in the whole take) and its `states`: `{t, where}` for each place it is held, from the first frame ("in her mouth, ball hidden, only the stick shows" → "between two fingers at her chest" → "in her mouth"). A touch that leaves the prop where it is (pinching a stick that stays in the mouth) is not a state; drop it or put it to the user as a risk, because a take renders it as a second prop in the hand.
+
+Floor plan: when two or more shots share a location that holds two or more figures, or a figure travels more than a metre in it, render one plan for those shots (`render_previs.py … --plan s01,s02,s03`) before the first full render. Look for cameras on both sides of an action line, a figure whose path jumps between shots, and a camera standing inside a set piece. Show the plan with the previs review, and use it when preparing set images so the background fits the layout. Skip it for a location with one figure that stays put, a location seen in one shot, and on the reference-led route.
 
 Revise on stills, render once. While the blocking is still changing, run `render_previs.py --audit-only`, then render only the event frames (`--frames`) and compare them with the reference or storyboard (`media.py pair --times`). Render the full animation once, after the stills match. Drafts you revise alone go to `previs/d01`, `previs/d02`…; only a render shown for review is numbered `v001`, `v002`…, so the first version the user sees is v001. Nothing is overwritten. Share the first comparison sheet as soon as it exists, with the fixes you plan: it is information, not an approval request. When a background render starts, say how long it is expected to take.
 
