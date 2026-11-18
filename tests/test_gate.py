@@ -38,7 +38,8 @@ def ready_project(root: Path) -> dict:
         'assets': [asset('hero', 'character'), asset('slide', 'prop')],
         'shots': [{'id': 's01', 'required_events': ['hero lands'],
                    'object_roles': {'hero': 'hero', 'slide': 'slide', 'ground': None},
-                   'props': {'slide': {'origin': 'stands in the yard from frame 1', 'holder': 'none', 'exit': 'stays'}},
+                   'props': {'slide': {'origin': 'stands in the yard from frame 1', 'holder': 'none', 'exit': 'stays', 'count': 1,
+                                       'states': [{'t': 0, 'where': 'in the yard'}]}},
                    'asset_bindings': [{'role_id': r, 'sha256': sha(root / f'{r}.png')} for r in ('hero', 'slide')],
                    'keyframes': [{'kind': 'start', 'path': 'k.png', 'sha256': sha(root / 'k.png'), 'approval': 'approved'}]}],
         'budget': {'cap': 100, 'settled': 0, 'reserved': 0, 'max_attempts': 5, 'attempts_used': 0,
@@ -121,6 +122,14 @@ class GateProjectTests(unittest.TestCase):
     def test_prop_needs_origin_holder_exit(self):
         self.shot['props']['slide']['origin'] = ''
         self.assertIn('s01: prop slide needs origin, holder and exit', self.errors())
+
+    def test_prop_needs_count(self):
+        del self.shot['props']['slide']['count']
+        self.assertIn('s01: prop slide needs count (how many exist in the whole take)', self.errors())
+
+    def test_prop_needs_states(self):
+        self.shot['props']['slide']['states'] = [{'t': 0}]
+        self.assertIn('s01: prop slide needs states ({t, where} for each place it is held, from the first frame)', self.errors())
 
     def test_props_wrong_type_reported_not_raised(self):
         self.shot['props'] = ['slide']

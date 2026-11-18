@@ -184,6 +184,12 @@ class QaTests(unittest.TestCase):
         group.update(result=None, measured_s=0.3)
         self.assertEqual(self.errors(), [])
 
+    def test_prop_count_result_required(self):
+        self.shot['props'] = {'lollipop': {'count': 1}}
+        self.assertIn('s01: prop lollipop needs a pass or accepted count result with evidence (prop_results)', self.errors())
+        self.shot['prop_results'] = {'lollipop': {'result': 'pass', 'evidence': 'qa/props.jpg: 1 at 0.5, 14, 28 s'}}
+        self.assertEqual(self.errors(), [])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -31,6 +31,8 @@ Build a per-shot request from approved story/action, camera, asset bindings, sta
 
 Before the first take, review its risks with the user: list what the take contains from fast crowd motion, many faces, small hand props and framing that changes mid-take, with the mitigation for each. Write the prompt to these rules, which fixed the first take of a 25 s single-take production (a mask that flew onto a face, smeared crowd faces, a missing spray):
 - Take each prop's `origin`, `holder` and `exit` from the shot's `props` and narrate them in that order.
+- State each prop's `count` and tie it to the first frame ("there is exactly one lollipop in the whole video: the one whose stick is in her mouth in the first frame; her hands start empty"). Write every entry of its `states` as the same object moving ("takes that lollipop out of her mouth"), never as an object that is simply there ("holds a lollipop").
+- Do not upload two images that show one prop in different states unless the prompt says which moment each shows; crop a character sheet to the panels without the prop.
 - Every action names who does it, with what, and where the object comes from ("takes a folded mask from her robe pocket, unfolds it with both hands, lays it on from the forehead down").
 - A group (the shot's `group_motion`) is written by its `sync`. `unison`: pose-then-hold beats ("bow deeply and freeze; straighten and pat both cheeks three times"). `ragged`: the same beats with their times, each member up to `spread_s` earlier or later than the ones beside it, with their own depth, angle and hand position, and the poses still readable at every beat to the end of the take. Neither is written as continuous frenzy.
 - One action per time window, and say what must stay visible and sharp.

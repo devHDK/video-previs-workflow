@@ -115,6 +115,47 @@ def settle(state_path, request_id, charge, outputs=(), status='succeeded'):
     _release_if_idle(state_path, state, held=previous in ACTIVE)
 
 
+def charge(state_path, request_id, amount, evidence):
+    """Correct a settled job's charge from the provider's own record (a balance difference can include other sessions)."""
+    state = _load(state_path); job = _job(state, request_id)
+    if 'settled_at' not in job: raise ValueError(f'job {request_id} is not settled')
+    if not (isinstance(evidence, str) and evidence.strip()): raise ValueError('evidence required: where the amount was read')
+    budget = state.setdefault('budget', {})
+    budget['settled'] = budget.get('settled', 0) - job.get('actual_charge', 0) + amount
+    job.update(actual_charge=amount, charge_evidence=evidence)
+    _save(state_path, state)
+
+
+def init(state_path, project_id):
+    if Path(state_path).exists(): raise ValueError('state exists')
+    _save(state_path, {'project_id': project_id, 'stage': 'story', 'assets': [], 'shots': [], 'jobs': [], 'continuity': []})
+
+
+COUNTERS = ('settled', 'reserved', 'attempts_used', 'manual_takes')  # owned by reserve/submit/settle/charge
+SECTIONS = ('output', 'generation_profile', 'budget', 'story', 'reference', 'previs', 'handoff', 'shot')
+
+
+def put(state_path, section, data):
+    """Merge a JSON object into a section, or into the shot with its id. Never approves and never moves budget counters."""
+    if section not in SECTIONS or not isinstance(data, dict): raise ValueError(f"section must be one of {', '.join(SECTIONS)} with a JSON object")
+    state = _load(state_path)
+    if section == 'shot':
+        if not isinstance(data.get('id'), str): raise ValueError('shot needs an id')
+        shots = state.setdefault('shots', [])
+        target = next((x for x in shots if isinstance(x, dict) and x.get('id') == data['id']), None)
+        if target is None: shots.append(data)
+        else: target.update(data)
+    else:
+        if section == 'budget': data = {k: v for k, v in data.items() if k not in COUNTERS}
+        if section in ('story', 'reference', 'previs'):  # a changed file is a new, unapproved record
+            path = data.get('path') or data.get('spec_path')
+            data = dict(data, approval='pending')
+            if section != 'previs': data['sha256'] = _hashed(state_path, path) if isinstance(path, str) else None
+            state[section] = data
+        else: state.setdefault(section, {}).update(data)
+    _save(state_path, state)
+
+
 def _record(state, kind, ident):
     if kind in ('story', 'reference', 'previs'): found = [state.get(kind)]
     elif kind == 'asset':
@@ -211,6 +252,11 @@ def main():
     q = sub.add_parser('settle'); q.add_argument('state'); q.add_argument('request_id'); q.add_argument('--charge', type=float, required=True)
     q.add_argument('--output', action='append', default=[], help='result path relative to the state folder; repeatable')
     q.add_argument('--status', default='succeeded', choices=('succeeded', 'failed', 'cancelled'))
+    q = sub.add_parser('charge', help="correct a settled job's charge"); q.add_argument('state'); q.add_argument('request_id')
+    q.add_argument('--charge', type=float, required=True); q.add_argument('--evidence', required=True)
+    q = sub.add_parser('init', help='create an empty state file'); q.add_argument('state'); q.add_argument('--project-id', required=True)
+    q = sub.add_parser('put', help='merge a JSON file into a section or a shot'); q.add_argument('state')
+    q.add_argument('section', choices=SECTIONS); q.add_argument('file')
     q = sub.add_parser('approve'); q.add_argument('state')
     q.add_argument('kind', choices=('story', 'reference', 'previs', 'asset', 'keyframe', 'continuity'))
     q.add_argument('ident', help='asset: role@version; keyframe: path; continuity: role; otherwise any text')
@@ -230,6 +276,9 @@ def main():
         elif a.action == 'reserve': reserve(a.state, json.loads(Path(a.job).read_text()))
         elif a.action == 'submit': submit(a.state, a.request_id, a.provider_job_id)
         elif a.action == 'settle': settle(a.state, a.request_id, a.charge, a.output, a.status)
+        elif a.action == 'charge': charge(a.state, a.request_id, a.charge, a.evidence)
+        elif a.action == 'init': init(a.state, a.project_id)
+        elif a.action == 'put': put(a.state, a.section, json.loads(Path(a.file).read_text()))
         elif a.action == 'approve': approve(a.state, a.kind, a.ident, a.evidence)
         elif a.action == 'asset': asset(a.state, a.ident, a.kind, a.path)
         elif a.action == 'keyframe': keyframe(a.state, a.shot, a.path, a.kind, a.previs_frame)

@@ -169,6 +169,11 @@ def shot_errors(state, shot, objects, root):
         handling = _dict(_dict(shot.get('props')).get(role))  # a prop with no stated source appears from nowhere in the take
         if not all(_text(handling.get(key)) for key in ('origin', 'holder', 'exit')):
             errors.append(f'{sid}: prop {role} needs origin, holder and exit')
+        if not (type(handling.get('count')) is int and handling['count'] > 0):  # an uncounted prop gets duplicated in the take
+            errors.append(f'{sid}: prop {role} needs count (how many exist in the whole take)')
+        states = _list(handling.get('states'))
+        if not states or not all(_number(_dict(x).get('t')) and _text(_dict(x).get('where')) for x in states):
+            errors.append(f'{sid}: prop {role} needs states ({{t, where}} for each place it is held, from the first frame)')
     starts = [k for k in _list(shot.get('keyframes'))
               if isinstance(k, dict) and k.get('kind') == 'start' and k.get('approval') == 'approved']
     if not starts: errors.append(f'{sid}: approved start keyframe required')
@@ -349,6 +354,10 @@ def check_qa(state, root):
             result = _dict(results.get(name))
             if result.get('result') not in ('pass', 'accepted') or not _text(result.get('evidence')):
                 errors.append(f'{sid}: event needs a pass or accepted result with evidence: {name}')
+        for role in _dict(shot.get('props')):  # counted on the take: a second copy of a prop is the usual defect
+            result = _dict(_dict(shot.get('prop_results')).get(role))
+            if result.get('result') not in ('pass', 'accepted') or not _text(result.get('evidence')):
+                errors.append(f'{sid}: prop {role} needs a pass or accepted count result with evidence (prop_results)')
         for role, group in _dict(shot.get('group_motion')).items():
             group = _dict(group); measured, target = group.get('measured_s'), group.get('spread_s')
             if not _number(measured): errors.append(f'{sid}: group_motion.{role}.measured_s required (media.py spread on the take)')

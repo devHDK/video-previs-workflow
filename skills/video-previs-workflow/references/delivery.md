@@ -17,6 +17,7 @@ For each shot build `media.py pair PREVIS TAKE sheet.jpg` (previs row over take 
 - Prop continuity across shots: the same prop keeps the same structure, material and colour wherever it appears.
 - Boundaries: for consecutive shots that share a set role, extract the last frame of one take and the first frame of the next (`ffmpeg -sseof -0.1 -i A.mp4 -update 1 a_last.png` and `ffmpeg -i B.mp4 -frames:v 1 b_first.png`; `media.py extract` samples at an interval and can miss the final second) and compare floor, light, set dressing and character positions; report differences as defects.
 - Identity, silhouette/clothes, props, entity counts and scale, and background continuity.
+- Prop count: for each entry of the shot's `props`, lay stills from just before to just after every change in its `states` and count the prop in each; record `prop_results.<role>` (`pass`, or `accepted` with the user's words). A second copy in the hand while the first is still in the mouth is the usual failure.
 - Event order, contact/occlusion, motion direction, camera movement and entry/exit state.
 - Timing drift, frozen/padded frames and unintended cuts. Run `media.py dupes TAKE` on every take: web exports can repeat a frame every second; `--fix OUT` replaces each with the average of its neighbours (a one-frame ghost on fast motion) and the original take is kept.
 - Groups: run `media.py spread` on the take over the same window and grid proportions as the reference and store it as `group_motion.<role>.measured_s`. Overall beat timing does not show whether members move together.

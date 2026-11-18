@@ -107,6 +107,36 @@ class StateTests(unittest.TestCase):
         done = subprocess.run([sys.executable, str(SCRIPTS / 'state.py'), 'unlock', str(self.path)], capture_output=True, text=True)
         self.assertEqual((done.returncode, done.stdout.strip()), (0, 'OK'))   # no lock, nothing active: nothing to do
 
+    def test_init_creates_and_refuses_overwrite(self):
+        new = self.root / 'p' / 'state.json'; new.parent.mkdir()
+        self.m.init(new, 'demo')
+        self.assertEqual(json.loads(new.read_text())['project_id'], 'demo')
+        with self.assertRaisesRegex(ValueError, 'state exists'): self.m.init(new, 'demo')
+
+    def test_put_section_shot_and_pending_record(self):
+        self.m.put(self.path, 'generation_profile', {'model': 'm', 'max_duration_s': 30})
+        self.m.put(self.path, 'shot', {'id': 's01', 'frames': 48}); self.m.put(self.path, 'shot', {'id': 's01', 'props': {}})
+        (self.root / 'ref.json').write_text('{}')
+        self.m.put(self.path, 'reference', {'path': 'ref.json', 'approval': 'approved'})
+        s = self.state()
+        self.assertEqual(s['generation_profile']['model'], 'm')
+        self.assertEqual(s['shots'], [{'id': 's01', 'frames': 48, 'props': {}}])
+        self.assertEqual((s['reference']['approval'], s['reference']['sha256']), ('pending', hashlib.sha256(b'{}').hexdigest()))
+
+    def test_put_budget_keeps_counters(self):
+        self.paid(); self.m.put(self.path, 'budget', {'cap': 60, 'settled': 99, 'reserved': 99, 'attempts_used': 99})
+        b = self.state()['budget']
+        self.assertEqual((b['cap'], b['settled'], b['reserved'], b['attempts_used']), (60, 0, 1, 0))
+
+    def test_charge_corrects_a_settled_job(self):
+        self.paid(); self.m.submit(self.path, 'j1'); self.m.settle(self.path, 'j1', 3.125)
+        self.m.charge(self.path, 'j1', 2, 'provider transactions 2026-11-18')
+        s = self.state()
+        self.assertEqual((s['budget']['settled'], s['jobs'][0]['actual_charge'], s['jobs'][0]['charge_evidence']),
+                         (2, 2, 'provider transactions 2026-11-18'))
+        with self.assertRaisesRegex(ValueError, 'not settled'):
+            self.m.lock(self.path, 'h', 'p'); self.m.reserve(self.path, {'request_id': 'j2', 'quote': 1}); self.m.charge(self.path, 'j2', 1, 'x')
+
 if __name__ == '__main__': unittest.main()
 
 

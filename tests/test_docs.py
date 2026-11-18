@@ -42,7 +42,8 @@ class DocTests(unittest.TestCase):
                      '--frames', '--size', '--shot', '--audit-only', '--times', 'state.py', 'blocking.py', 'previs/d01',
                      'kind `reference`', '--status cancelled', 'group_motion', 'spread_s', 'measured_s', 'unlisted_motion',
                      '`travel`', 'event_results', 'gate.py qa', 'media.py dupes', 'media.py spread', 'media.py reframe',
-                     'state.py asset', 'state.py keyframe', 'state.py note', 'state.py bind'):
+                     'state.py asset', 'state.py keyframe', 'state.py note', 'state.py bind',
+                     'state.py init', 'state.py put', 'state.py charge', 'prop_results', '`count`', '`states`'):
             self.assertTrue(name in refs, f'{name} is not documented in references/')
 
     def test_skill_md_stays_compact(self):
