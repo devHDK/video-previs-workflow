@@ -184,7 +184,8 @@ def sheet(images, output, cols=2, cell=(270, 480)):
     with tempfile.TemporaryDirectory(prefix='video-sheet-') as temp:
         for i, image in enumerate(images):
             run(['ffmpeg', '-v', 'error', '-n', '-i', image, '-frames:v', '1',
-                 '-vf', f'scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2', Path(temp) / f'{i:04d}.png'])
+                 '-vf', f'scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,format=rgb24',  # one pixel format, or the sequence drops cells
+                 Path(temp) / f'{i:04d}.png'])
         run(['ffmpeg', '-v', 'error', '-n', '-i', Path(temp) / '%04d.png', '-frames:v', '1',
              '-vf', f'tile={cols}x{-(-len(images) // cols)}', output])
     return [{'row': i // cols + 1, 'col': i % cols + 1, 'path': str(image)} for i, image in enumerate(images)]

@@ -124,6 +124,19 @@ class SheetTests(unittest.TestCase):
         video = next(s for s in media.probe(path)['streams'] if s['codec_type'] == 'video')
         return video['width'], video['height']
 
+    def test_mixed_pixel_formats_all_reach_their_cells(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t); images = []
+            for i, (colour, fmt) in enumerate((('red', 'rgba'), ('green', 'rgb24'), ('blue', 'rgba'), ('white', 'gray'))):
+                images.append(root / f'{i}.png')
+                subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'color=c={colour}:s=90x160,format={fmt}', '-frames:v', '1',
+                                str(images[-1])], check=True)
+            media.sheet(images, root / 'sheet.png', cols=4)
+            raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(root / 'sheet.png'), '-vf', 'scale=4:1:flags=neighbor', '-f', 'rawvideo',
+                                  '-pix_fmt', 'rgb24', '-'], capture_output=True, check=True).stdout
+            cells = [tuple(raw[i:i + 3]) for i in range(0, 12, 3)]
+            self.assertTrue(cells[0][0] > 200 and cells[1][1] > 100 and cells[2][2] > 200 and min(cells[3]) > 200, cells)
+
     def test_images_tile_in_rows_and_bad_input_writes_nothing(self):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t); images = []
