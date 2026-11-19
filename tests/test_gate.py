@@ -20,6 +20,11 @@ def sha(p):
 
 
 SETUP = {f: 'x' for f in ('premise', 'tone', 'avoid', 'lead', 'setting')}  # `hook` is optional, so the fixtures leave it out
+PER_SHOT = {'generation_mode': 'per_shot', 'duration_s': 2}  # every video job says how it is generated
+PLAN_NEEDED = "generation_plan: the user's choice of per_shot, multi_cut or one_take for each take is not recorded"
+LOOK = {'camera': {'holder': 'lead', 'lens': 'phone', 'motion': 'handheld', 'views': ['pov', 'selfie']},
+        'pace': {'avg_shot_s': 2, 'cuts': 'hard'}, 'speech': 'none', 'captions': 'info',
+        'colour': {'light': 'available', 'grade': 'phone_auto'}, 'world': 'lived_in', 'performance': 'to_camera'}
 
 
 def ready_project(root: Path) -> dict:
@@ -35,6 +40,7 @@ def ready_project(root: Path) -> dict:
         'story': {'path': 'story.json', 'sha256': sha(root / 'story.json'), 'approval': 'approved'},
         'previs': {'spec_path': 'scene.json', 'approval': 'approved'},
         'generation_profile': {'route': 'manual', 'model': 'm', 'max_duration_s': 30, 'duration_step_s': 1},
+        'generation_plan': {'takes': [{'mode': 'per_shot', 'shots': ['s01']}], 'evidence': 'user: one job per shot'},
         'assets': [asset('hero', 'character'), asset('slide', 'prop')],
         'shots': [{'id': 's01', 'required_events': ['hero lands'],
                    'object_roles': {'hero': 'hero', 'slide': 'slide', 'ground': None},
@@ -98,7 +104,8 @@ class GateProjectTests(unittest.TestCase):
         del self.shot['no_previs']
         shot = self.insert(no_previs='close insert', frames=24 * 31)
         self.assertEqual(self.errors(), ['s02: 31.0 s exceeds generation_profile.max_duration_s 30'])
-        job = {'shot': 's02', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        job = dict(PER_SHOT, shot='s02', quote=28, start_frame_sha256=sha(self.root / 'k.png'))
+        self.state['generation_plan']['takes'].append({'mode': 'per_shot', 'shots': ['s02']})
         self.assertEqual(self.g.check_submission(self.state, job, self.root), ['job: take of 31.0 s exceeds generation_profile.max_duration_s 30'])
         for bad in (12.5, 12.0, None, 0, -1, True, '24'):
             shot['frames'] = bad
@@ -122,6 +129,21 @@ class GateProjectTests(unittest.TestCase):
         self.assertIn('story: approved story design or reference breakdown required', e)
         self.assertIn('previs: approval required', e)
 
+    def test_ready_needs_the_recorded_generation_choice(self):
+        del self.state['generation_plan']
+        self.assertEqual(self.errors(), [PLAN_NEEDED])
+
+    def test_plan_takes_are_well_formed(self):
+        plan = self.state['generation_plan']
+        for bad in ({'mode': 'fast', 'shots': ['s01']}, {'mode': 'per_shot'}, {'mode': 'per_shot', 'shots': [['s01']]}, 'per_shot'):
+            plan['takes'] = [bad]
+            self.assertEqual(self.errors(), ['generation_plan: each take needs a mode (per_shot, multi_cut or one_take) and its shots'], bad)
+        for bad in ({'mode': 'per_shot', 'shots': ['s01', 's02']}, {'mode': 'multi_cut', 'shots': ['s01']}):
+            plan['takes'] = [bad]
+            self.assertEqual(self.errors(), ['generation_plan: per_shot takes one shot and multi_cut two or more'], bad)
+        plan['takes'] = [{'mode': 'one_take', 'shots': ['s01', 's02']}, {'mode': 'per_shot', 'shots': ['s02']}]
+        self.assertEqual(self.errors(), ['generation_plan: s02 is in two takes'])
+
     def test_story_change_detected(self):
         (self.root / 'story.json').write_text('{}')
         self.assertIn('story: file missing or changed since approval', self.errors())
@@ -129,7 +151,56 @@ class GateProjectTests(unittest.TestCase):
     def test_story_core_fields_required(self):
         (self.root / 'story.json').write_text('{}')
         self.state['story']['sha256'] = sha(self.root / 'story.json')
-        self.assertIn('story: purpose, target_action and structure are required', self.errors())
+        self.assertIn('story: target_action.action is required', self.errors())
+
+    def story(self, **fields):
+        data = dict({'target_action': {'action': 'save'}, 'setup': SETUP}, **fields)  # no purpose, no structure: a mood piece
+        (self.root / 'story.json').write_text(json.dumps(data)); self.state['story']['sha256'] = sha(self.root / 'story.json')
+
+    def look(self, **changes):
+        look = json.loads(json.dumps(LOOK))
+        for path, value in changes.items():
+            *parents, leaf = path.split('__'); node = look
+            for key in parents: node = node[key]
+            node[leaf] = value
+        self.story(version=2, setup=dict(SETUP, look=look))
+
+    def test_story_without_purpose_or_structure_passes(self):
+        self.story()
+        self.assertEqual(self.errors(), [])
+
+    def test_version_2_story_needs_a_look(self):
+        self.story(version=2)
+        self.assertEqual(self.errors(), ['story: setup.look is required'])
+        self.look(camera__holder='drone')
+        self.assertIn('story: setup.look.camera.holder must be one of: lead, companion, unseen', self.errors())
+
+    def test_each_shot_names_a_view_the_look_lists(self):
+        self.look()  # one 48-frame shot at 24 fps: 2.0 s, the look's average
+        self.assertEqual(self.errors(), ['s01: view must be one of: selfie, pov, mirror, propped, insert, observer'])
+        self.shot['view'] = 'pov'
+        self.assertEqual(self.errors(), [])
+        self.shot['view'] = 'observer'  # a camera nobody in the scene holds
+        self.assertEqual(self.errors(), ['s01: view observer is not in setup.look.camera.views; give view_reason or change the look'])
+        self.shot['view_reason'] = 'the stylist films one shot on her phone'
+        self.assertEqual(self.errors(), [])
+
+    def test_cut_rhythm_stays_within_30_percent_of_the_look(self):
+        self.shot['view'] = 'pov'
+        for average, ok in ((1.6, True), (2.8, True), (1.5, False), (4, False)):
+            self.look(pace__avg_shot_s=average)
+            expected = [] if ok else [f'pace: shots average 2.0 s, outside 30 % of setup.look.pace.avg_shot_s {average:g}']
+            self.assertEqual(self.errors(), expected, average)
+
+    def test_no_previs_shots_count_toward_the_rhythm(self):
+        self.shot['view'] = 'pov'
+        self.insert(no_previs='close insert', view='pov')['frames'] = 240  # 10 s: the average becomes 6 s
+        self.look()
+        self.assertEqual(self.errors(), ['pace: shots average 6.0 s, outside 30 % of setup.look.pace.avg_shot_s 2'])
+
+    def test_story_without_a_look_asks_nothing_of_the_shots(self):
+        self.assertNotIn('view', self.shot)  # version 1 stories and their projects keep passing
+        self.assertEqual(self.errors(), [])
 
     def test_story_setup_required(self):
         data = json.loads((self.root / 'story.json').read_text()); data['setup']['tone'] = ' '
@@ -282,9 +353,9 @@ def reference_project(root: Path) -> dict:
     return state
 
 
-def write_reference(root, shots, rights='own', match='shot', upload_agreed=None, candidates=None):
+def write_reference(root, shots, rights='own', match='shot', upload_agreed=None, candidates=None, version=1, setup=SETUP):
     source = {'path': 'inputs/reference.mp4', 'sha256': 'abc', 'rights': rights, 'upload_agreed': upload_agreed}
-    ref = {'version': 1, 'source': {k: v for k, v in source.items() if v is not None}, 'setup': SETUP, 'shots': shots,
+    ref = {'version': version, 'source': {k: v for k, v in source.items() if v is not None}, 'setup': setup, 'shots': shots,
            'match': match, 'candidates': candidates}
     (root / 'reference.json').write_text(json.dumps({k: v for k, v in ref.items() if v is not None}))
 
@@ -366,7 +437,7 @@ class GateReferenceTests(unittest.TestCase):
         self.assertEqual(len(self.errors()), 2)
 
     def test_third_party_footage_as_job_input_needs_a_recorded_agreement(self):
-        base = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        base = dict(PER_SHOT, shot='s01', quote=28, start_frame_sha256=sha(self.root / 'k.png'))
         job = dict(base, inputs=[{'path': './inputs/reference.mp4', 'slot': 'video 1'}, {'path': 'previs/s01.mp4'}])
         self.assertEqual(self.g.check_submission(self.state, job, self.root), [])            # own footage
         self.rewrite(self.shots(), rights='third_party')
@@ -392,8 +463,18 @@ class GateReferenceTests(unittest.TestCase):
         self.assertEqual(self.errors(), [])
 
     def test_submission_accepts_reference(self):
-        job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        job = dict(PER_SHOT, shot='s01', quote=28, start_frame_sha256=sha(self.root / 'k.png'))
         self.assertEqual(self.g.check_submission(self.state, job, self.root), [])
+
+    def test_version_2_reference_carries_the_look_it_was_measured_for(self):
+        write_reference(self.root, self.shots(), version=2); self.state['reference']['sha256'] = sha(self.root / 'reference.json')
+        self.assertEqual(self.errors(), ['reference: setup.look is required'])
+        look = dict(LOOK, pace={'avg_shot_s': 1.75, 'cuts': 'hard'})  # the two shots are 1.5 s and 2 s
+        write_reference(self.root, self.shots(), version=2, setup=dict(SETUP, look=look))
+        self.state['reference']['sha256'] = sha(self.root / 'reference.json')
+        self.assertEqual(self.errors(), ['s01: view must be one of: selfie, pov, mirror, propped, insert, observer'])
+        self.state['shots'][0]['view'] = 'selfie'
+        self.assertEqual(self.errors(), [])
 
     def test_reference_setup_required(self):
         ref = json.loads((self.root / 'reference.json').read_text()); ref['setup'] = ['funny']
@@ -515,7 +596,7 @@ class GateSubmissionTests(unittest.TestCase):
         self.g = load('gate')
         self.state = ready_project(self.root)
         self.budget = self.state['budget']
-        self.job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        self.job = dict(PER_SHOT, shot='s01', quote=28, start_frame_sha256=sha(self.root / 'k.png'))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -525,6 +606,24 @@ class GateSubmissionTests(unittest.TestCase):
 
     def test_submission_within_budget_passes(self):
         self.assertEqual(self.errors(), [])
+
+    def test_job_says_how_it_is_generated(self):
+        del self.job['generation_mode']
+        self.assertEqual(self.errors(), ['job: generation_mode required (per_shot, multi_cut or one_take)'])
+
+    def test_job_follows_the_recorded_choice(self):
+        self.state['generation_plan']['takes'] = [{'mode': 'one_take', 'shots': ['s01']}]  # the user chose a one-take
+        self.assertEqual(self.errors(), ['job: per_shot of s01 is not a take in generation_plan'])
+        self.job['retry_of'] = 'j0'  # a pickup may redo part of its take another way
+        self.assertEqual(self.errors(), [])
+        self.state['generation_plan']['takes'] = [{'mode': 'one_take', 'shots': ['s09']}]
+        self.assertEqual(self.errors(), ['job: per_shot of s01 is not a take in generation_plan'])
+
+    def test_choice_is_recorded_with_the_users_words(self):
+        take = {'mode': 'per_shot', 'shots': ['s01']}
+        for bad in ({}, {'takes': [take]}, {'takes': [take], 'evidence': ' '}, {'takes': [], 'evidence': 'ok'}, 'per_shot'):
+            self.state['generation_plan'] = bad
+            self.assertEqual(self.errors(), [PLAN_NEEDED], bad)
 
     def test_submission_cannot_consume_retry_reserve(self):
         self.budget['settled'] = 50
@@ -655,11 +754,11 @@ class GateContinuityTests(unittest.TestCase):
         self.state['continuity'] = [hero, slide]
         msg = 'continuity: role hero cannot be reviewed until every shot using it has an approved keyframe (s02)'
         self.assertIn(msg, self.errors())
-        job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        job = dict(PER_SHOT, shot='s01', quote=28, start_frame_sha256=sha(self.root / 'k.png'))
         self.assertIn(msg, self.g.check_submission(self.state, job, self.root))
 
     def test_submit_checks_roles_of_its_shot(self):
-        job = {'shot': 's01', 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        job = dict(PER_SHOT, shot='s01', quote=28, start_frame_sha256=sha(self.root / 'k.png'))
         e = self.g.check_submission(self.state, job, self.root)
         self.assertIn('continuity: role hero needs an approved cross-shot keyframe review', e)
 
@@ -672,7 +771,9 @@ class GateSequenceJobTests(unittest.TestCase):
     def setUp(self):
         GateContinuityTests.setUp(self)  # same two-shot project, without inheriting its tests
         self.state['continuity'] = [self.review('hero'), self.review('slide')]
-        self.job = {'shot': 's01', 'shots': ['s01', 's02'], 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png')}
+        self.job = {'shot': 's01', 'shots': ['s01', 's02'], 'quote': 28, 'start_frame_sha256': sha(self.root / 'k.png'),
+                    'generation_mode': 'one_take', 'duration_s': 4}
+        self.state['generation_plan'] = {'takes': [{'mode': 'one_take', 'shots': ['s01', 's02']}], 'evidence': 'user: one take'}
 
     def sub(self):
         return self.g.check_submission(self.state, self.job, self.root)

@@ -21,7 +21,7 @@ mkdir -p "$PROJECT/.agents/skills" "$PROJECT/.claude/skills"
 [ ! -e "$PROJECT/.claude/skills/story-design" ] && cp -R skills/story-design "$PROJECT/.claude/skills/"
 ```
 
-`story-design`은 콘셉트에서 **핵심 목적 → 유도할 시청자 행동 → 둘에 맞는 스토리 구조**를 먼저 정하고 시간별 비트를 설계합니다. video-previs-workflow는 승인된 스토리 설계서를 요구하지만, story-design 설치는 선택입니다(설계서 필드만 확인).
+`story-design`은 콘셉트에서 **어떻게 찍을지(`setup.look`: 카메라를 든 사람·컷 길이·대사·자막·빛·생활감) → 유도할 시청자 행동 → 있을 때만 목적과 갈등 구조**를 먼저 정하고 시간별 비트를 설계합니다. video-previs-workflow는 승인된 스토리 설계서를 요구하지만, story-design 설치는 선택입니다(설계서 필드만 확인).
 
 Agent Skills installer를 사용하는 경우 아래 방식도 사용할 수 있습니다. 설치 대상 호스트와 프로젝트/전역 범위는 설치기의 선택 화면에서 확인하세요. 실제 설치기 검증 여부는 [검증 기록](VALIDATION.md)을 참고하세요.
 

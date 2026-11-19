@@ -128,11 +128,12 @@ def charge(state_path, request_id, amount, evidence):
 
 def init(state_path, project_id):
     if Path(state_path).exists(): raise ValueError('state exists')
+    Path(state_path).parent.mkdir(parents=True, exist_ok=True)  # a new production starts in a folder of its own
     _save(state_path, {'project_id': project_id, 'stage': 'story', 'assets': [], 'shots': [], 'jobs': [], 'continuity': []})
 
 
 COUNTERS = ('settled', 'reserved', 'attempts_used', 'manual_takes')  # owned by reserve/submit/settle/charge
-SECTIONS = ('output', 'generation_profile', 'budget', 'story', 'reference', 'previs', 'handoff', 'shot')
+SECTIONS = ('output', 'generation_profile', 'generation_plan', 'budget', 'story', 'reference', 'previs', 'handoff', 'shot')
 
 
 def put(state_path, section, data):

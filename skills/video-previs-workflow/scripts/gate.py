@@ -30,6 +30,38 @@ SETUP_NEEDED = 'setup needs premise, tone, avoid, lead and setting'
 def _setup_ok(data): return all(_text(_dict(_dict(data).get('setup')).get(field)) for field in SETUP_FIELDS)
 
 
+# setup.look: how the video is shot, as picks. Required from version 2. Same in story-design check_story.py
+LOOK = {'camera.holder': ('lead', 'companion', 'unseen'), 'camera.lens': ('phone', 'normal', 'tele'),
+        'camera.motion': ('handheld', 'static', 'designed'), 'pace.cuts': ('hard', 'jump', 'transition'),
+        'speech': ('none', 'voiceover', 'dialogue'), 'captions': ('info', 'subtitle', 'none'),
+        'colour.light': ('available', 'designed'), 'colour.grade': ('phone_auto', 'natural', 'stylized'),
+        'world': ('lived_in', 'clean'), 'performance': ('to_camera', 'unaware', 'posed')}
+VIEWS = ('selfie', 'pov', 'mirror', 'propped', 'insert', 'observer')
+
+
+def look_errors(look):
+    if not isinstance(look, dict): return ['setup.look is required']
+
+    def at(path):
+        value = look
+        for key in path.split('.'): value = _dict(value).get(key)
+        return value
+    errors = [f"setup.look.{path} must be one of: {', '.join(values)}" for path, values in LOOK.items()
+              if not (isinstance(at(path), str) and at(path) in values)]
+    views = at('camera.views')
+    if not (isinstance(views, list) and views and all(isinstance(v, str) and v in VIEWS for v in views) and len(set(views)) == len(views)):
+        errors.append(f"setup.look.camera.views must list one or more of: {', '.join(VIEWS)}")
+    if not _positive(at('pace.avg_shot_s')): errors.append('setup.look.pace.avg_shot_s must be a positive number')
+    return errors
+
+
+def _look_errors(data, who):
+    """A story or reference file written before the look existed (version 1, no look) is not asked for one."""
+    data = _dict(data); setup = _dict(data.get('setup'))
+    if 'look' not in setup and not (_number(data.get('version')) and data['version'] >= 2): return []
+    return [f'{who}: {e}' for e in look_errors(setup.get('look'))]
+
+
 def _unchanged(root, record):
     path = record.get('path')
     return isinstance(path, str) and (root / path).is_file() and sha256(root / path) == record.get('sha256')
@@ -52,6 +84,7 @@ def check_reference(ref, spec=None, max_duration=None, unblocked=None):
     if source.get('rights') not in ('own', 'third_party'): errors.append('reference: source.rights must be own or third_party')
     if ref.get('match') not in ('format', 'shot'): errors.append('reference: match must be format or shot')
     if not _setup_ok(ref): errors.append(f'reference: {SETUP_NEEDED}')
+    errors += _look_errors(ref, 'reference')
     candidates = ref.get('candidates', [])
     if not (isinstance(candidates, list) and all(isinstance(c, dict) and _number(c.get('t')) for c in candidates)):
         errors.append('reference: candidates must be a list of {t, score, decision}')
@@ -139,10 +172,8 @@ def _story_file_errors(state, root):
     try: data = _dict(json.loads((root / story['path']).read_text()))
     except ValueError: data = {}
     errors = [] if _setup_ok(data) else [f'story: {SETUP_NEEDED}']
-    if _text(data.get('purpose')) and _text(_dict(data.get('target_action')).get('action')) \
-            and _text(_dict(data.get('structure')).get('id')):
-        return errors
-    return ['story: purpose, target_action and structure are required'] + errors
+    if not _text(_dict(data.get('target_action')).get('action')): errors.insert(0, 'story: target_action.action is required')
+    return errors + _look_errors(data, 'story')  # a purpose and a structure are the story's choice
 
 
 def spec_objects(state, root):
@@ -246,6 +277,38 @@ def profile_errors(state):
     return [] if ok else [PROFILE_NEEDED]
 
 
+MODES = ('per_shot', 'multi_cut', 'one_take')
+PLAN_NEEDED = "generation_plan: the user's choice of per_shot, multi_cut or one_take for each take is not recorded"
+
+
+def plan_errors(state):
+    """How the shots are generated is the user's choice, asked with the previs review and recorded with their words."""
+    plan = _dict(state.get('generation_plan')); takes = _list(plan.get('takes'))
+    if not (takes and _text(plan.get('evidence'))): return [PLAN_NEEDED]
+    errors, seen = [], set()
+    for take in map(_dict, takes):
+        mode, shots = take.get('mode'), take.get('shots')
+        if not (isinstance(mode, str) and mode in MODES and isinstance(shots, list) and shots and all(_text(s) for s in shots)):
+            errors.append('generation_plan: each take needs a mode (per_shot, multi_cut or one_take) and its shots'); continue
+        if (mode == 'per_shot' and len(shots) != 1) or (mode == 'multi_cut' and len(shots) < 2):
+            errors.append('generation_plan: per_shot takes one shot and multi_cut two or more')
+        errors += [f'generation_plan: {sid} is in two takes' for sid in dict.fromkeys(shots) if sid in seen]
+        seen |= set(shots)
+    return errors
+
+
+def plan_job_errors(state, job, covered):
+    """A video job is generated the way the plan says. A retry may redo part of its take another way (a one-shot pickup)."""
+    mode = job.get('generation_mode')
+    if not (isinstance(mode, str) and mode in MODES): return ['job: generation_mode required (per_shot, multi_cut or one_take)']
+    errors = plan_errors(state)
+    if errors: return errors
+    takes = [_dict(t) for t in state['generation_plan']['takes']]
+    if job.get('retry_of'): ok = any(set(covered) <= set(t['shots']) for t in takes)
+    else: ok = any(t['mode'] == mode and t['shots'] == covered for t in takes)
+    return [] if ok else [f"job: {mode} of {', '.join(covered)} is not a take in generation_plan"]
+
+
 def _spec(state, root):
     path = _dict(state.get('previs')).get('spec_path')
     if not isinstance(path, str) or not (root / path).is_file(): return {}
@@ -253,14 +316,38 @@ def _spec(state, root):
     except ValueError: return {}
 
 
-def duration_errors(state, root, shot_ids=None):
-    """A take longer than the model's limit cannot be generated: every shot, or the sum of a job's covered shots."""
-    limit, spec = _dict(state.get('generation_profile')).get('max_duration_s'), _spec(state, root)
-    fps = spec.get('fps')
-    if not (_positive(limit) and _positive(fps)): return []  # a missing profile is reported by profile_errors
+def _shot_seconds(state, root):
+    spec = _spec(state, root); fps = spec.get('fps')
+    if not _positive(fps): return {}
     seconds = {s.get('id'): s['frames'] / fps for s in map(_dict, _list(spec.get('shots')))
                if isinstance(s.get('id'), str) and _number(s.get('frames'))}
     seconds.update({sid: n / fps for sid, n in _unblocked(state).items() if sid not in seconds and _positive(n)})
+    return seconds
+
+
+def look_fit_errors(state, root):
+    """Shots against the approved look: each names a view the look lists, and the cut rhythm is the look's."""
+    look = next((look for look in (_dict(_approved_file(state, root, key).get('setup')).get('look') for key in ('story', 'reference'))
+                 if isinstance(look, dict)), None)
+    if look is None or look_errors(look): return []  # none to hold the shots to, or a broken one story_errors reports
+    shots = [s for s in map(_dict, _list(state.get('shots'))) if isinstance(s.get('id'), str)]
+    errors = []
+    for shot in shots:
+        view = shot.get('view')
+        if view not in VIEWS: errors.append(f"{shot['id']}: view must be one of: {', '.join(VIEWS)}")
+        elif view not in look['camera']['views'] and not _text(shot.get('view_reason')):
+            errors.append(f"{shot['id']}: view {view} is not in setup.look.camera.views; give view_reason or change the look")
+    seconds, target = _shot_seconds(state, root), look['pace']['avg_shot_s']
+    lengths = [seconds[s['id']] for s in shots if s['id'] in seconds]
+    if lengths and not 0.7 * target <= sum(lengths) / len(lengths) <= 1.3 * target:
+        errors.append(f'pace: shots average {sum(lengths) / len(lengths):.1f} s, outside 30 % of setup.look.pace.avg_shot_s {target:g}')
+    return errors
+
+
+def duration_errors(state, root, shot_ids=None):
+    """A take longer than the model's limit cannot be generated: every shot, or the sum of a job's covered shots."""
+    limit, seconds = _dict(state.get('generation_profile')).get('max_duration_s'), _shot_seconds(state, root)
+    if not (_positive(limit) and seconds): return []  # a missing profile is reported by profile_errors
     over = lambda who, value: [f'{who} {value:.1f} s exceeds generation_profile.max_duration_s {limit:g}'] if value > limit else []
     if shot_ids is not None:
         return over('job: take of', sum(seconds.get(sid, 0) for sid in shot_ids if isinstance(sid, str)))
@@ -350,11 +437,14 @@ def motion_errors(shot, spec_shot, fps, ref_shot):
     return errors
 
 
-def _reference(state, root):
-    record = _dict(state.get('reference'))
+def _approved_file(state, root, key):
+    record = _dict(state.get(key))
     if record.get('approval') != 'approved' or not isinstance(record.get('path'), str): return {}
     try: return _dict(json.loads((root / record['path']).read_text()))
     except (OSError, ValueError): return {}
+
+
+def _reference(state, root): return _approved_file(state, root, 'reference')
 
 
 def blocking_errors(state, root, shot_ids=None):
@@ -410,8 +500,8 @@ def check_project(state, root):
         errors += shot_errors(state, shot, [] if spec_errors else objects.get(shot['id']), root, not spec_errors)
         for role, shas in _shas(shot.get('asset_bindings')).items(): versions.setdefault(role, set()).update(shas)
     errors += [f'role {role} is bound to different versions across shots' for role, shas in versions.items() if len(shas) > 1]
-    return (errors + blocking_errors(state, root) + continuity_errors(state) + kind_errors(state) + note_errors(state)
-            + profile_errors(state) + duration_errors(state, root) + budget_errors(state))
+    return (errors + look_fit_errors(state, root) + blocking_errors(state, root) + continuity_errors(state) + kind_errors(state)
+            + note_errors(state) + profile_errors(state) + plan_errors(state) + duration_errors(state, root) + budget_errors(state))
 
 
 def footage_errors(sid, job, ref, root):
@@ -452,6 +542,7 @@ def check_submission(state, job, root):
     errors += blocking_errors(state, root, covered) + continuity_errors(state, roles)
     errors += kind_errors(state) + note_errors(state) + profile_errors(state) + duration_errors(state, root, covered)
     errors += footage_errors(sid, job, _reference(state, root), root)
+    if all(isinstance(cid, str) for cid in covered): errors += plan_job_errors(state, job, covered)
     if job.get('generation_mode') == 'multi_cut' and job.get('route') == 'manual':
         for item in job['inputs'][1:]:
             photo = root / item['path']

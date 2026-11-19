@@ -113,6 +113,16 @@ class StateTests(unittest.TestCase):
         self.assertEqual(json.loads(new.read_text())['project_id'], 'demo')
         with self.assertRaisesRegex(ValueError, 'state exists'): self.m.init(new, 'demo')
 
+    def test_init_creates_the_project_folder(self):
+        new = self.root / 'projects' / 'demo' / 'state.json'  # a new production starts in a folder of its own
+        self.m.init(new, 'demo')
+        self.assertEqual(json.loads(new.read_text())['project_id'], 'demo')
+
+    def test_put_generation_plan(self):
+        plan = {'takes': [{'mode': 'multi_cut', 'shots': ['s01', 's02']}], 'evidence': 'user: multi-cut'}
+        self.m.put(self.path, 'generation_plan', plan)
+        self.assertEqual(json.loads(self.path.read_text())['generation_plan'], plan)
+
     def test_put_section_shot_and_pending_record(self):
         self.m.put(self.path, 'generation_profile', {'model': 'm', 'max_duration_s': 30})
         self.m.put(self.path, 'shot', {'id': 's01', 'frames': 48}); self.m.put(self.path, 'shot', {'id': 's01', 'props': {}})

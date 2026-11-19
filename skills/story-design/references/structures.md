@@ -1,6 +1,6 @@
 # Story structures
 
-Pick the structure that serves the locked purpose and target action. The id goes in `structure.id`; the number in parentheses is the minimum count of pre-payoff beats with an active `obstacle` that `check_story.py` enforces. Conflict is a tool, not a default.
+A story with conflict picks the structure that serves its purpose and target action. The id goes in `structure.id`; the number in parentheses is the minimum count of pre-payoff beats with an active `obstacle` that `check_story.py` enforces. Conflict is a tool, not a default: a piece without it (a visit, a routine, a day) needs no id and says in `structure.why` why its beats come in this order. The rows marked (0) are shapes to borrow from, not a choice it has to make.
 
 | id | Use when (purpose → action) | Required elements | Failure signs |
 |---|---|---|---|
