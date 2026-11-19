@@ -246,6 +246,82 @@ def bind(state_path):
     _save(state_path, state)
 
 
+def select_takes(state_path, rows):
+    import delivery_check
+    state = _load(state_path)
+    root = Path(state_path).resolve().parent
+    shots = {s['id']: s for s in state['shots']}
+    if not isinstance(rows,list) or not rows:
+        raise ValueError('selection needs a nonempty list')
+    from gate import _spec
+    frame_counts = {s['id']: s.get('frames') for s in _spec(state,root).get('shots', [])}
+    seen, sources = set(), {}
+    changed = False
+    for row in rows:
+        sid = row['shot']
+        if sid not in shots or sid in seen:
+            raise ValueError(f'{sid}: missing or duplicate shot')
+        seen.add(sid)
+        shot = shots[sid]
+        job = _job(state, row['request_id'])
+        if job.get('status') != 'succeeded' or sid not in job.get('shots',[job.get('shot')]):
+            raise ValueError(f'{sid}: job must cover shot and have succeeded')
+        source = row['source']
+        record = next((r for r in job['outputs'] if r['path']==source),None)
+        if source not in sources:
+            sources[source] = (_hashed(state_path,source),delivery_check.video_info(root/source))
+        digest, info = sources[source]
+        if not record or record['sha256'] != digest:
+            raise ValueError(f'{sid}: source differs from ingested output')
+        start,end,target,hold = (row[k] for k in ('start','end','target_frames','hold_frames'))
+        if not all(type(n) is int for n in (start,end,target,hold)) or not 0 <= start < end <= info['frames']:
+            raise ValueError(f'{sid}: invalid source range')
+        take = delivery_check.video_info(root/row['take'])
+        if take['fps'] != info['fps'] or target != end-start+hold or hold < 0 or take['frames'] != target or target != frame_counts.get(sid,shot.get('frames')):
+            raise ValueError(f'{sid}: selected frame counts or rates disagree')
+        if hold and not (isinstance(row.get('hold_acceptance'), str) and row['hold_acceptance'].strip()):
+            raise ValueError(f'{sid}: review and accept padded preview first')
+        selection = dict(row,sha256=_hashed(state_path,row['take']),source_sha256=digest)
+        if shot.get('selected_output') != selection:
+            shot['selected_output'] = selection
+            shot.pop('event_results',None)
+            shot.pop('prop_results',None)
+            for group in shot.get('group_motion',{}).values():
+                for key in ('measured_s','result','evidence'):
+                    group.pop(key,None)
+            changed = True
+    for job in state.get('jobs',[]):
+        if job.get('generation_mode') != 'one_take':
+            continue
+        previous = None
+        for sid in job.get('shots',[job.get('shot')]):
+            selection = shots.get(sid,{}).get('selected_output')
+            if not isinstance(selection,dict) or selection.get('request_id') != job['request_id']:
+                previous = None
+                continue
+            if selection['hold_frames'] or (previous and (previous['source'] != selection['source'] or previous['end'] != selection['start'])):
+                raise ValueError(f'{sid}: one-take ranges must preserve continuous action')
+            previous = selection
+    if changed:
+        state.pop('delivery',None)
+        state['stage'] = 'edit'
+        _save(state_path,state)
+
+
+def deliver(state_path, manifest_path, mp4):
+    from delivery_check import delivery_errors
+    state = _load(state_path)
+    root = Path(state_path).resolve().parent
+    errors = delivery_errors(state,root,_load(manifest_path),mp4,Path(manifest_path).resolve().parent)
+    if errors:
+        raise ValueError('\n'.join(errors))
+    record = {key: {'path': os.path.relpath(path,root),'sha256': _hashed(state_path,Path(path).resolve())}
+              for key,path in [('manifest',manifest_path),('video',mp4)]}
+    if state.get('delivery') != record or state.get('stage') != 'delivered':
+        state.update(stage='delivered',delivery=record)
+        _save(state_path,state)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='action', required=True)
@@ -274,9 +350,16 @@ def main():
     q.add_argument('kind', choices=('asset', 'keyframe')); q.add_argument('ident'); q.add_argument('--note')
     q.add_argument('--resolve', choices=('fixed', 'accepted')); q.add_argument('--evidence')
     q = sub.add_parser('bind', help='bind approved assets to the shots that use their roles'); q.add_argument('state')
+    q = sub.add_parser('select-takes')
+    q.add_argument('state'); q.add_argument('selection')
+    q = sub.add_parser('deliver')
+    for name in ('state','manifest','mp4'):
+        q.add_argument(name)
     a = p.parse_args()
     try:
-        if a.action == 'lock': lock(a.state, a.owner, a.purpose)
+        if a.action == 'select-takes': select_takes(a.state,_load(a.selection))
+        elif a.action == 'deliver': deliver(a.state,a.manifest,a.mp4)
+        elif a.action == 'lock': lock(a.state, a.owner, a.purpose)
         elif a.action == 'unlock': unlock(a.state)
         elif a.action == 'reserve': reserve(a.state, json.loads(Path(a.job).read_text()))
         elif a.action == 'submit': submit(a.state, a.request_id, a.provider_job_id)

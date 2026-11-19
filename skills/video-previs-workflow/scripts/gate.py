@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from generation_job import validate_job
 from motion import figure_moves, members, travel  # noqa: E402
 
 
@@ -429,6 +430,10 @@ def footage_errors(sid, job, ref, root):
 def check_submission(state, job, root):
     """One paid job: its shot must be ready and the job must not eat the retry reserve unless it is a retry."""
     if not isinstance(state, dict) or not isinstance(job, dict): return ['state and job must be objects']
+    try:
+        validate_job(job, state.get('generation_profile'))
+    except (KeyError, ValueError, TypeError) as error:
+        return [f'job: {error}']
     sid = job.get('shot')
     by_id = {s['id']: s for s in _list(state.get('shots')) if isinstance(s, dict) and isinstance(s.get('id'), str)}
     shot = by_id.get(sid) if isinstance(sid, str) else None
@@ -447,6 +452,11 @@ def check_submission(state, job, root):
     errors += blocking_errors(state, root, covered) + continuity_errors(state, roles)
     errors += kind_errors(state) + note_errors(state) + profile_errors(state) + duration_errors(state, root, covered)
     errors += footage_errors(sid, job, _reference(state, root), root)
+    if job.get('generation_mode') == 'multi_cut' and job.get('route') == 'manual':
+        for item in job['inputs'][1:]:
+            photo = root / item['path']
+            if not photo.is_file() or sha256(photo) != approved_start_sha(by_id.get(item['shot'], {})):
+                errors.append(f"{item['shot']}: input photo must match approved start keyframe")
     start = approved_start_sha(shot)
     if start is not None and job.get('start_frame_sha256') != start:
         errors.append(f'{sid}: job start frame is not the approved keyframe')
@@ -481,10 +491,16 @@ def main():
     q = sub.add_parser('qa', help='selected takes checked against required events'); q.add_argument('state')
     q = sub.add_parser('reference', help='reference breakdown file, before approval'); q.add_argument('file')
     q.add_argument('--max-duration', type=float, help="the model's longest take in seconds, to check split takes")
+    q = sub.add_parser('delivery', help='verify selected takes and final timeline')
+    for name in ('state', 'manifest', 'mp4'):
+        q.add_argument(name)
     a = p.parse_args()
     if a.action == 'reference': _report(check_reference(json.loads(Path(a.file).read_text()), max_duration=a.max_duration))
     state_path = Path(a.state).resolve()
     state = json.loads(state_path.read_text())
+    if a.action == 'delivery':
+        from delivery_check import delivery_errors
+        _report(delivery_errors(state, state_path.parent, json.loads(Path(a.manifest).read_text()), Path(a.mp4), Path(a.manifest).resolve().parent))
     if a.action == 'ready': _report(check_project(state, state_path.parent))
     if a.action == 'qa': _report(check_qa(state, state_path.parent))
     else: _report(check_submission(state, json.loads(Path(a.job).read_text()), state_path.parent))

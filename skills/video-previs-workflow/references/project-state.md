@@ -57,3 +57,13 @@ Only one agent/host may submit jobs for a project at a time. Before modifying st
 Do these steps with `state.py` (`lock`, `reserve`, `submit`, `settle`, `approve`, `unlock`; see local-tools.md) instead of editing the file by hand: it takes and releases the lock, keeps `reserved` and `settled` in step with the jobs and writes atomically. Hand edits remain for recovery. `gate.py` still only reads.
 
 These are orchestration instructions, not a payment firewall: bundled scripts do not submit jobs or enforce provider-side credit limits.
+
+### Generation modes and verified delivery
+
+New video jobs store `generation_mode` (`per_shot`, `multi_cut`, or `one_take`), `shot`, ordered `shots`, and the actual requested `duration_s`. Old jobs still open without these fields. For a manual multi-cut job the first input is the combined previs with its editor `tag`. Subsequent inputs each carry a unique image tag and a matching `shot`. Put the previs mention in the base prompt and supply ordered `beats`, e.g. `{"shot":"s02","start_s":2,"action":"She enters the bath."}`. Start at zero. The packer inserts each photo mention and derives the end from the next beat or job duration. Use the validated duration in the web settings.
+
+After ingest and settlement, run `state.py select-takes STATE SELECTION.json`. The file is a list of rows, e.g. `{"shot":"s02","request_id":"v001","source":"takes/v001/source.mp4","start":48,"end":69,"take":"shots/s02/edit.mp4","target_frames":24,"hold_frames":3,"hold_acceptance":"user accepted the grouped preview"}`. The end is exclusive. Keep selections and edit takes at the same fps for this command. Use an exact contiguous source range before padding, retain full source separately, and record event results after choosing the take. Resume from selected_output and open event results.
+
+Before reporting completion run `gate.py delivery STATE MANIFEST MP4`, then `state.py deliver STATE MANIFEST MP4` to record verified file hashes and the delivered stage. Both commands use the assembler's clips/frames manifest and compare it with the approved output and the encoded media. Record an approved target change with its evidence before updating the target. Missing evidence remains open.
+
+For delivery, identify each manifest clip with its timeline `shot` ID (including footage and opening reuse IDs). Keep paths relative to the manifest. The delivery check compares the reference shot order when available, and verifies each selected edit take's path, hash and unaltered frame range.
