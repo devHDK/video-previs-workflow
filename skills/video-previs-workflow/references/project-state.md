@@ -1,6 +1,6 @@
 # Resumable project records
 
-Keep production data in a user-selected project directory, outside the installed skill. Suggested layout:
+Every production has a project directory of its own, outside the installed skill. A new one is `projects/<project-id>/` under the working directory (a short lowercase name with hyphens), unless the user names another place: say the path, then create it with `state.py init projects/<project-id>/state.json --project-id <project-id>`, which makes the folder and refuses one that already holds a state file. Write nothing of a production into the working directory itself or into another production's folder. To resume, find the folder by its state file (`projects/*/state.json`) and read `state.json` and `brief.md` before anything else; when more than one fits the request, ask which. Layout:
 
 ```
 brief.md
@@ -25,6 +25,7 @@ Maintain these fields (JSON or equivalent structured text):
 - `project_id`, `revision`, `stage`, `updated_at`, `active_host`.
 - `output`: width, height, fps, total_frames, audio/subtitle requirements.
 - `generation_profile`: route, model, `max_duration_s`, `duration_step_s`, image_refs, video_refs, resolution, unlimited, evidence. Recorded before the story or reference is approved.
+- `generation_plan`: `takes` (each a `mode`, `per_shot`, `multi_cut` or `one_take`, and its ordered `shots`) and `evidence`, the user's words. Asked with the previs review; the gate holds every video job to it.
 - `story`: path, sha256, approval status, evidence and time (`approved_at`). Required before previs, unless `reference` is approved.
 - `reference`: the same fields for a reference breakdown (`reference-vNNN.json`) on the reference-led route.
 - `previs`: spec_path/hash, render_path/hash, approval status, approved revision, evidence and time.
@@ -60,7 +61,7 @@ These are orchestration instructions, not a payment firewall: bundled scripts do
 
 ### Generation modes and verified delivery
 
-New video jobs store `generation_mode` (`per_shot`, `multi_cut`, or `one_take`), `shot`, ordered `shots`, and the actual requested `duration_s`. Old jobs still open without these fields. For a manual multi-cut job the first input is the combined previs with its editor `tag`. Subsequent inputs each carry a unique image tag and a matching `shot`. Put the previs mention in the base prompt and supply ordered `beats`, e.g. `{"shot":"s02","start_s":2,"action":"She enters the bath."}`. Start at zero. The packer inserts each photo mention and derives the end from the next beat or job duration. Use the validated duration in the web settings.
+Every video job stores `generation_mode` (`per_shot`, `multi_cut`, or `one_take`), `shot`, ordered `shots`, and the actual requested `duration_s`; `gate.py submit` refuses one without a mode, or whose mode and shots are not a take in `generation_plan`. Jobs recorded before these fields existed still open. For a manual multi-cut job the first input is the combined previs with its editor `tag`. Subsequent inputs each carry a unique image tag and a matching `shot`. Put the previs mention in the base prompt and supply ordered `beats`, e.g. `{"shot":"s02","start_s":2,"action":"She enters the bath."}`. Start at zero. The packer inserts each photo mention and derives the end from the next beat or job duration. Use the validated duration in the web settings.
 
 After ingest and settlement, run `state.py select-takes STATE SELECTION.json`. The file is a list of rows, e.g. `{"shot":"s02","request_id":"v001","source":"takes/v001/source.mp4","start":48,"end":69,"take":"shots/s02/edit.mp4","target_frames":24,"hold_frames":3,"hold_acceptance":"user accepted the grouped preview"}`. The end is exclusive. Keep selections and edit takes at the same fps for this command. Use an exact contiguous source range before padding, retain full source separately, and record event results after choosing the take. Resume from selected_output and open event results.
 

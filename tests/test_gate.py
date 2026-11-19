@@ -787,6 +787,8 @@ class GateSequenceJobTests(unittest.TestCase):
 
     def test_sequence_take_must_fit_model_limit(self):
         self.state['generation_profile']['max_duration_s'] = 3
+        self.assertEqual(self.sub(), ['job: requested duration exceeds profile'])
+        self.job['duration_s'] = 3  # asking for less does not shorten the covered shots
         self.assertIn('job: take of 4.0 s exceeds generation_profile.max_duration_s 3', self.sub())
 
     def test_sequence_job_unknown_shot(self):
@@ -799,7 +801,7 @@ class GateSequenceJobTests(unittest.TestCase):
 
     def test_sequence_must_begin_with_shot(self):
         self.job['shots'] = ['s02', 's01']
-        self.assertIn('job: shots must begin with shot', self.sub())
+        self.assertEqual(self.sub(), ['job: shots must be distinct and begin with shot'])
 
 if __name__ == '__main__':
     unittest.main()
